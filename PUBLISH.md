@@ -21,7 +21,6 @@ dsh-prompt-snippets/
 │   ├── en.json          # 市场显示名/描述（英文）
 │   └── zh.json          # 市场显示名/描述（中文）
 ├── icon.svg             # 插件图标（64×64）
-├── LICENSE              # 建议 MIT
 ├── PUBLISH.md           # 本发布清单
 └── README.md            # 使用说明
 ```
@@ -42,7 +41,7 @@ dsh-prompt-snippets/
 `parseMarketIndex` 全部规则逐条验证），**无需再填占位**——它已含：
 
 1. **仓库 URL**：`https://github.com/dadazhangn/dsh-prompt-snippets`
-2. **commit SHA**：`8258072b285cef09fba0af49416890b776c202f8`（纯插件本体 HEAD）
+2. **commit SHA**：`dd0384ac686da7719f3971900f7ceb2947eaa0e6`（纯插件本体 HEAD，已推送）
 3. **publishTimestamp**：`1793090155`（Unix 秒）
 
 > ⚠️ 唯一前提：这个 commit SHA 是**本地仓库** HEAD。当你真正 `git push` 到
@@ -79,7 +78,7 @@ dsh plugin install ./prompt-snippets
 - 顶层 `format` 必须是 `1`；`title` 必须含 `en`（我们用了 `{en, zh}`）。
 - `plugins` 非空，`name` 唯一、符合 npm 包名规则（`dsh-prompt-snippets` ✓）。
 - `versions` 非空，`version` 精确 SemVer（`1.0.0` ✓），同插件版本不重复。
-- `publishTimestamp` 为 Unix 秒整数，范围 `[0, 10^11)`（`1793089211` ✓）。
+- `publishTimestamp` 为 Unix 秒整数，范围 `[0, 10^11)`（`1793090155` ✓）。
 - **git source**：`url` 必须 https、canonical、至少两段 path、非 tarball；
   `commit` 必须 40 位小写 hex。
 - `engines.dsh` 必须合法 SemVer range（`>=0.2.1-rc.3` ✓，基于当前 DSH
@@ -102,7 +101,7 @@ dsh plugin install ./prompt-snippets
 4. 把 `../market-submission/market-index.json` 提交给市场维护方（或按市场约定
    的提交流程挂到指定位置），由其合入市场索引。
 5. （可选）在 `package.json` 增补 `"author"`、`"license"`、`"homepage"` 等元数据，
-   并补一份 `LICENSE`。
+   并补一份 `LICENSE`（若补，需同步加进 `package.json` 的 `files` 与仓库）。
 
 ---
 
