@@ -1,0 +1,25 @@
+{
+  "name": "dsh-prompt-snippets",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "保存并一键插入可复用的提示词片段，支持分类与 {{占位符}}。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "README.md"],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  }
+}
