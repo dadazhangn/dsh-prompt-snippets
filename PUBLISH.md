@@ -21,36 +21,34 @@ dsh-prompt-snippets/
 │   ├── en.json          # 市场显示名/描述（英文）
 │   └── zh.json          # 市场显示名/描述（中文）
 ├── icon.svg             # 插件图标（64×64）
-├── market-index.json    # 市场索引（见下，待填真实 URL/commit）
 ├── LICENSE              # 建议 MIT
+├── PUBLISH.md           # 本发布清单
 └── README.md            # 使用说明
 ```
 
 > 注意：`package.json` 里 `name` 已统一为 `dsh-prompt-snippets`（不是 `@local/...`），
 > 与 `cordis.patch.yml`、`client.js` 的 `window.__ModuleLoader__.load` id 三者一致。
 
+> **市场索引 JSON 不随插件仓库一起分发**：`market-index.json` 是市场侧元数据，
+> 已分离到 `../market-submission/` 目录。安装器只读 `source.url + commit`，
+> checkout 后读 `package.json`，从不读仓库里的 market-index.json；把它放进仓库
+> 反而会造成「填了 commit 再提交、SHA 又变」的死循环。因此仓库里**只含纯插件本体**。
+
 ---
 
-## 二、发布前必改的 3 处占位
+## 二、市场索引（已生成，位于 `../market-submission/`）
 
-`market-index.json` 里有两类占位，发布前必须替换：
+`market-index.json` 已经生成并通过 format 1 权威校验（复刻官方
+`parseMarketIndex` 全部规则逐条验证），**无需再填占位**——它已含：
 
-1. **仓库 URL（3 处）**：`https://github.com/USERNAME/dsh-prompt-snippets`
-   —— 替换 `USERNAME` 为你的 GitHub 用户名；若仓库名不同，也一并改。
-2. **commit SHA（1 处）**：`"commit": "0000000000000000000000000000000000000000"`
-   —— 推送到 GitHub 后，用 `git rev-parse HEAD` 得到 40 位小写 hex SHA 填进去。
-3. **publishTimestamp**：`market-index.json` 里 `publishTimestamp` 已填
-   `1793089211`（对应 2026-10-27 附近）。若之后重新发布，更新为发布时刻的
-   Unix 秒整数。
+1. **仓库 URL**：`https://github.com/dadazhangn/dsh-prompt-snippets`
+2. **commit SHA**：`8258072b285cef09fba0af49416890b776c202f8`（纯插件本体 HEAD）
+3. **publishTimestamp**：`1793090155`（Unix 秒）
 
-### 一次性替换命令（Linux/macOS 或 Git Bash）
-
-```bash
-USER=你的GitHub用户名
-SHA=$(git rev-parse HEAD)
-sed -i "s|USERNAME|$USER|g" market-index.json
-sed -i "s|0000000000000000000000000000000000000000|$SHA|" market-index.json
-```
+> ⚠️ 唯一前提：这个 commit SHA 是**本地仓库** HEAD。当你真正 `git push` 到
+> GitHub 后，如果线上 default 分支的 HEAD 与本地一致（同一提交），则 SHA 不变；
+> 若你在推送前又做了新提交，需重新 `git rev-parse HEAD` 并更新上述 commit 与
+> `../market-submission/market-index.json`。
 
 ---
 
@@ -98,10 +96,11 @@ dsh plugin install ./prompt-snippets
 
 1. 本地验证：`dsh plugin install ./prompt-snippets`，重启/刷新页面，
    输入框下方应出现「📋 片段库」；`/snippet add`、`/snippet list` 往返正常。
-2. 建 GitHub 仓库，推送上面结构的所有文件。
-3. 记录 commit SHA，替换 `market-index.json` 里的占位（见第二节）。
-4. 把最终的 `market-index.json` 提交给市场维护方（或按市场约定的提交流程
-   挂到指定位置），由其合入市场索引。
+2. 建 GitHub 仓库 `dsh-prompt-snippets`，把上面结构的所有文件（纯插件本体）推上去。
+3. 确认线上 HEAD 与本地一致后，`../market-submission/market-index.json` 里的
+   commit SHA 即为有效值（不一致则用 `git rev-parse HEAD` 更新）。
+4. 把 `../market-submission/market-index.json` 提交给市场维护方（或按市场约定
+   的提交流程挂到指定位置），由其合入市场索引。
 5. （可选）在 `package.json` 增补 `"author"`、`"license"`、`"homepage"` 等元数据，
    并补一份 `LICENSE`。
 
@@ -118,7 +117,8 @@ dsh plugin install ./prompt-snippets
 | `locale/{en,zh}.json` | 市场显示名/描述 |
 | `icon.svg` | 图标 |
 | `README.md` | 使用说明 |
-| `market-index.json` | 市场索引（含占位，待填真实 URL/commit） |
+| `PUBLISH.md` | 发布清单 |
+| `../market-submission/market-index.json` | 市场索引（已生成并通过校验，独立于仓库） |
 
 `/snippet add <名称> <内容> [--cat <分类>]` 已支持分类（`--cat`/`-c`），
 面板按分类分组展示。
