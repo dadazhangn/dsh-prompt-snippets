@@ -6,6 +6,7 @@ window.__ModuleLoader__.load({
     const { useState, useEffect } = React;
 
     const CHANNEL = "/prompt-snippets";
+    const Z_TOP = 2147483647;
 
     // —— 轻量内联样式 ——
     const style = {
@@ -24,16 +25,16 @@ window.__ModuleLoader__.load({
         cursor: "pointer",
       },
       panel: {
-        position: "absolute",
-        zIndex: 1000,
-        marginTop: "4px",
+        position: "fixed",
+        zIndex: Z_TOP,
         width: "280px",
-        maxHeight: "360px",
+        maxHeight: "380px",
         overflow: "auto",
         borderRadius: "8px",
         border: "1px solid #d0d7de",
-        background: "var(--color-bg, #fff)",
-        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+        background: "#ffffff",
+        color: "#1f2328",
+        boxShadow: "0 12px 32px rgba(0,0,0,0.28)",
         padding: "6px",
       },
       group: { fontWeight: 600, fontSize: "11px", opacity: 0.7, padding: "6px 8px 2px", textTransform: "uppercase", letterSpacing: "0.03em" },
@@ -68,6 +69,7 @@ window.__ModuleLoader__.load({
     function SnippetDock({ inputActions, rpc }) {
       const [snippets, setSnippets] = useState([]);
       const [open, setOpen] = useState(false);
+      const [panelPos, setPanelPos] = useState(null);
       const [error, setError] = useState(null);
 
       const load = () => {
@@ -83,6 +85,43 @@ window.__ModuleLoader__.load({
         load();
       }, []);
 
+      // 点击面板外部时关闭
+      useEffect(() => {
+        if (!open) return;
+        const onDoc = (e) => {
+          const panel = document.getElementById("ps-panel");
+          const btn = document.getElementById("ps-button");
+          if (panel && !panel.contains(e.target) && btn && !btn.contains(e.target)) {
+            setOpen(false);
+          }
+        };
+        document.addEventListener("mousedown", onDoc, true);
+        return () => document.removeEventListener("mousedown", onDoc, true);
+      }, [open]);
+
+      const toggle = (e) => {
+        const next = !open;
+        if (next) {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const vh = window.innerHeight;
+          const vw = window.innerWidth;
+          const panelW = 280;
+          let left = rect.left;
+          if (left + panelW > vw - 8) left = Math.max(8, vw - panelW - 8);
+          // 向上展开：优先在按钮上方，空间不足则向下
+          const panelH = 380;
+          let top;
+          if (rect.top - panelH - 8 >= 0) {
+            top = rect.top - panelH - 8;
+          } else {
+            top = rect.bottom + 8;
+          }
+          setPanelPos({ left, top });
+        }
+        setOpen(next);
+        if (next) load();
+      };
+
       const insert = (snippet) => {
         try {
           const span = inputActions.captureInsertion();
@@ -93,14 +132,18 @@ window.__ModuleLoader__.load({
         setOpen(false);
       };
 
-      return h("div", { style: { ...style.dock, position: "relative" } },
+      return h("div", { style: style.dock },
         h("button", {
+          id: "ps-button",
           type: "button",
           style: style.button,
-          onClick: () => { setOpen(!open); if (!open) load(); },
+          onClick: toggle,
           title: "提示词片段库",
         }, "📋 片段库"),
-        open && h("div", { style: style.panel },
+        open && h("div", {
+          id: "ps-panel",
+          style: { ...style.panel, left: panelPos ? panelPos.left + "px" : "8px", top: panelPos ? panelPos.top + "px" : "8px" },
+        },
           error
             ? h("div", { style: style.error }, "⚠ " + error)
             : snippets.length === 0
