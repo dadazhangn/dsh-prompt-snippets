@@ -162,9 +162,9 @@ export function apply(ctx) {
 
   ctx.commands.register({
     name: "snippet",
-    description: "管理提示词片段：保存、列出、删除",
-    input: { hint: "add <名称> <内容> [--cat <分类>] | list | rm <名称>" },
-    async handler({ rawInput }) {
+    description: "管理提示词片段：保存、列出、删除、AI 优化",
+    input: { hint: "add <名称> <内容> [--cat <分类>] | list | rm <名称> | optimize <名称>" },
+    async handler({ rawInput, signal }) {
       const args = (rawInput ?? "").trim();
       const [verb, ...rest] = args.split(/\s+/);
 
@@ -230,8 +230,20 @@ export function apply(ctx) {
           return { kind: "success", text: `已删除片段「${name}」。` };
         }
 
+        case "optimize":
+        case "opt": {
+          const name = rest.join(" ").trim();
+          if (!name) return { kind: "error", text: "用法：/snippet optimize <名称>" };
+          const store = await load();
+          const snippet = store.snippets.find((s) => s.name === name);
+          if (!snippet) return { kind: "error", text: `未找到片段「${name}」。` };
+          const result = await optimize(ctx, snippet.content, signal);
+          if (!result.ok) return { kind: "error", text: `优化失败：${result.error.message}` };
+          return { kind: "success", text: `「${name}」优化结果：\n\n${result.value.optimized}` };
+        }
+
         default:
-          return { kind: "error", text: "未知操作。用法：/snippet add <名称> <内容> [--cat <分类>] | list | rm <名称>" };
+          return { kind: "error", text: "未知操作。用法：/snippet add <名称> <内容> [--cat <分类>] | list | rm <名称> | optimize <名称>" };
       }
     },
   });
