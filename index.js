@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export const name = "prompt-snippets";
-export const inject = ["connection", "commands"];
+export const inject = ["connection", "commands", "webServer"];
 
 const CHANNEL = "/prompt-snippets";
 
@@ -92,7 +92,11 @@ async function dispatch(endpoint, payload) {
 }
 
 export function apply(ctx) {
-  ctx.connection.rpc.handle(CHANNEL, async (endpoint, payload) => {
+  // 不能用 ctx.connection.rpc.handle()：它内部用 connection 插件自己的 fiber
+  // ctx 作为 owner 去读 owner.webServer，而 webServer 是 connection 的兄弟
+  // entry（不在其祖先链上），属性访问会抛错导致路由未注册、请求落 405。
+  // 正确做法：本插件 inject webServer，并把 owner 显式传成本插件的 ctx。
+  ctx.connection.register(ctx, CHANNEL, async (endpoint, payload) => {
     try {
       return await dispatch(endpoint, payload);
     } catch (error) {
