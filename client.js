@@ -7,8 +7,8 @@ window.__ModuleLoader__.load({
 
     const CHANNEL = "/prompt-snippets";
     const Z_TOP = 2147483647;
-    const PANEL_W = 280;
-    const PANEL_H = 380;
+    const PANEL_W = 320;
+    const PANEL_H = 400;
     const POS_KEY = "dsh-prompt-snippets-panel-pos";
 
     // —— 轻量内联样式 ——
@@ -65,9 +65,16 @@ window.__ModuleLoader__.load({
       },
       body: { overflow: "auto", padding: "6px" },
       group: { fontWeight: 600, fontSize: "11px", opacity: 0.7, padding: "6px 8px 2px", textTransform: "uppercase", letterSpacing: "0.03em" },
+      itemRow: {
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+        width: "100%",
+      },
       item: {
         display: "block",
-        width: "100%",
+        flex: 1,
+        minWidth: 0,
         textAlign: "left",
         padding: "7px 8px",
         fontSize: "13px",
@@ -76,7 +83,22 @@ window.__ModuleLoader__.load({
         background: "transparent",
         color: "inherit",
         cursor: "pointer",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
       },
+      optimize: {
+        border: "1px solid transparent",
+        background: "transparent",
+        fontSize: "13px",
+        lineHeight: 1,
+        cursor: "pointer",
+        padding: "4px 6px",
+        borderRadius: "5px",
+        opacity: 0.7,
+        flexShrink: 0,
+      },
+      optimizeBusy: { opacity: 0.4, cursor: "default" },
       empty: { padding: "12px 8px", fontSize: "12px", opacity: 0.7 },
       error: { padding: "12px 8px", fontSize: "12px", color: "#d23" },
       hint: { padding: "4px 8px 6px", fontSize: "10px", opacity: 0.5, borderTop: "1px solid #e4e8ec" },
@@ -119,6 +141,7 @@ window.__ModuleLoader__.load({
       const [panelPos, setPanelPos] = useState(null);
       const [drag, setDrag] = useState(null);
       const [error, setError] = useState(null);
+      const [optimizing, setOptimizing] = useState(null); // 正在优化的片段 id
 
       const load = () => {
         Promise.resolve(rpc.call(CHANNEL, "list", {}))
@@ -200,14 +223,40 @@ window.__ModuleLoader__.load({
         setDrag({ startX: e.clientX, startY: e.clientY, left: panelPos.left, top: panelPos.top });
       };
 
-      const insert = (snippet) => {
+      const insertText = (text) => {
         try {
           const span = inputActions.captureInsertion();
-          inputActions.insertText(snippet.content, span);
+          inputActions.insertText(text, span);
+          return true;
         } catch (_) {
-          /* 插入失败时忽略，用户可手动复制 */
+          return false;
         }
+      };
+
+      const insert = (snippet) => {
+        insertText(snippet.content);
         setOpen(false);
+      };
+
+      const optimize = (snippet) => {
+        if (optimizing) return;
+        setOptimizing(snippet.id);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "optimize", { content: snippet.content }))
+          .then((result) => {
+            setOptimizing(null);
+            if (result && result.ok) {
+              const text = result.value.optimized;
+              insertText(text);
+              setOpen(false);
+            } else {
+              setError(result && result.error ? result.error.message : "优化失败");
+            }
+          })
+          .catch((err) => {
+            setOptimizing(null);
+            setError(String((err && err.message) || err));
+          });
       };
 
       return h("div", { style: style.dock },
@@ -245,18 +294,26 @@ window.__ModuleLoader__.load({
                     h("div", { key: category || "__none__" },
                       category ? h("div", { style: style.group }, category) : null,
                       list.map((s) =>
-                        h("button", {
-                          key: s.id,
-                          type: "button",
-                          style: style.item,
-                          onClick: () => insert(s),
-                          title: s.content,
-                        }, s.name)
+                        h("div", { key: s.id, style: style.itemRow },
+                          h("button", {
+                            type: "button",
+                            style: style.item,
+                            onClick: () => insert(s),
+                            title: "点击插入\n\n" + s.content,
+                          }, s.name),
+                          h("button", {
+                            type: "button",
+                            style: optimizing === s.id ? { ...style.optimize, ...style.optimizeBusy } : style.optimize,
+                            onClick: () => optimize(s),
+                            disabled: optimizing !== null,
+                            title: "AI 优化后插入",
+                          }, optimizing === s.id ? "…" : "✨")
+                        )
                       )
                     )
                   )
           ),
-          h("div", { style: style.hint }, "拖动标题栏移动 · 位置会自动记住")
+          h("div", { style: style.hint }, "点名称插入原文 · ✨ AI 优化后插入 · 拖动标题栏移动")
         )
       );
     }

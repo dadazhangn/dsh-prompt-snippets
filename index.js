@@ -49,8 +49,58 @@ function fail(code, message) {
   return { ok: false, error: { code, message, details: {} } };
 }
 
-/** RPC 端点分派：list / save / delete。 */
-async function dispatch(endpoint, payload) {
+const OPTIMIZE_SYSTEM = [
+  "你是一位专业的提示词工程专家。请优化用户提供的提示词，让它更清晰、更具体、更有效。",
+  "",
+  "规则：",
+  "1. 保留原意与核心目标，不改变任务本质。",
+  "2. 若原提示词缺少必要的上下文、约束或输出格式要求，请合理补充。",
+  "3. 保留 {{占位符}} 原样不动，不要替换或删除。",
+  "4. 直接输出优化后的提示词正文，不要任何解释、前言、客套话，也不要包裹在 markdown 代码块里。",
+].join("\n");
+
+/** 用当前默认模型优化一段提示词，返回 { optimized }。 */
+async function optimize(ctx, content, signal) {
+  const llm = ctx.get("llm");
+  const defaultModel = ctx.get("agentDefaultModel");
+  if (!llm) return fail("unavailable", "当前环境没有可用的模型服务");
+  let provider;
+  let model;
+  if (defaultModel) {
+    try {
+      const sel = defaultModel.currentSelection();
+      provider = sel && sel.provider;
+      model = sel && sel.model;
+    } catch (_) {
+      /* 读取失败则退回未配置 */
+    }
+  }
+  if (!provider || !model) return fail("unavailable", "未配置默认模型，无法优化");
+
+  let text = "";
+  try {
+    for await (const chunk of llm.stream({
+      provider,
+      model,
+      system: OPTIMIZE_SYSTEM,
+      messages: [{ role: "user", content: [{ type: "text", text: content }] }],
+      maxTokens: 2000,
+      ...(signal ? { signal } : {}),
+    })) {
+      if (chunk && chunk.type === "text-delta") text += chunk.text;
+    }
+  } catch (error) {
+    if (signal && signal.aborted) return fail("aborted", "优化已取消");
+    return fail("internal", error instanceof Error ? error.message : String(error));
+  }
+
+  const optimized = text.trim();
+  if (!optimized) return fail("internal", "优化结果为空");
+  return { ok: true, value: { optimized } };
+}
+
+/** RPC 端点分派：list / save / delete / optimize。 */
+async function dispatch(ctx, endpoint, payload, signal) {
   const store = await load();
   switch (endpoint) {
     case "list":
@@ -86,6 +136,12 @@ async function dispatch(endpoint, payload) {
       return { ok: true, value: store };
     }
 
+    case "optimize": {
+      const content = typeof payload?.content === "string" ? payload.content : "";
+      if (!content.trim()) return fail("bad-request", "片段内容不能为空");
+      return await optimize(ctx, content, signal);
+    }
+
     default:
       return fail("not-found", `未知操作：${String(endpoint)}`);
   }
@@ -96,9 +152,9 @@ export function apply(ctx) {
   // ctx 作为 owner 去读 owner.webServer，而 webServer 是 connection 的兄弟
   // entry（不在其祖先链上），属性访问会抛错导致路由未注册、请求落 405。
   // 正确做法：本插件 inject webServer，并把 owner 显式传成本插件的 ctx。
-  ctx.connection.register(ctx, CHANNEL, async (endpoint, payload) => {
+  ctx.connection.register(ctx, CHANNEL, async (endpoint, payload, signal) => {
     try {
-      return await dispatch(endpoint, payload);
+      return await dispatch(ctx, endpoint, payload, signal);
     } catch (error) {
       return fail("internal", error instanceof Error ? error.message : String(error));
     }
