@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-snippets",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "保存并一键插入可复用的提示词片段，支持分类与 {{占位符}}。",
