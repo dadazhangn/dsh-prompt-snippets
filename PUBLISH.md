@@ -1,171 +1,168 @@
-# 发布到市场 —— 操作清单
+# 发布到 npm（让插件进入官方市场索引）
 
-本文件指导你把 `dsh-prompt-snippets` 插件发布到 DSH 插件市场。市场采用
-**format 1 索引 JSON**（由 `@deepseek-ai/dsh-plugin-market-index` 校验），
-插件本体从 **GitHub 仓库（git source）** 安装。
+## 为什么必须发 npm
 
----
+`awesome-dsh-plugin` 的官方市场索引（`https://awesome-dsh-plugin.com/index.json`，由 npm 包
+`dsh-plugin-catalog` 分发）**只收 npm source**。`scripts/lib/market-index.mjs` 的原文是：
 
-## 一、GitHub 仓库结构
+> The GitHub-only half of the list cannot be expressed yet — format 1 wants a commit SHA
+> per Git version, and this repository records none.
 
-把 `prompt-snippets/` 目录里的文件推到新仓库（仓库名建议 `dsh-prompt-snippets`），
-根目录结构应为：
+代码层面 `buildMarketIndex` 对没有 npm 映射的条目直接 `skipped.noNpm += 1; continue`。
+后果很具体：条目 YAML 已被合并（PR #9994，站点详情页能打开），但如果插件是 git-only，
+它就**永远不会出现在「发现」标签页的可安装列表里**。
 
-```
-dsh-prompt-snippets/
-├── index.js             # host 半：/snippet 命令 + RPC 通道 + JSON 存储
-├── client.js            # client 半：输入框 dock「📋 片段库」面板
-├── package.json         # bundle 声明（dsh.bundle.patch + dsh.client）
-├── cordis.patch.yml     # 插入 host 半的 loader patch
-├── locale/
-│   ├── en.json          # 市场显示名/描述（英文）
-│   └── zh.json          # 市场显示名/描述（中文）
-├── icon.svg             # 插件图标（64×64）
-├── PUBLISH.md           # 本发布清单
-└── README.md            # 使用说明
-```
+另外，`dshmarket` README 第 14 行说明了索引分发的位置问题：
 
-> 注意：`package.json` 里 `name` 已统一为 `dsh-prompt-snippets`（不是 `@local/...`），
-> 与 `cordis.patch.yml`、`client.js` 的 `window.__ModuleLoader__.load` id 三者一致。
+> dsh 给索引源的时间只有 15 秒，而 GitHub Pages 上的那两份
+> （`https://awesome-dsh-plugin.com/index.json` 与 `https://dshmarket.com/index.json`）
+> 在部分网络下会超过。npm 分发的索引在哪里都快。
 
-> **市场索引 JSON 不随插件仓库一起分发**：`market-index.json` 是市场侧元数据，
-> 已分离到 `../market-submission/` 目录。安装器只读 `source.url + commit`，
-> checkout 后读 `package.json`，从不读仓库里的 market-index.json；把它放进仓库
-> 反而会造成「填了 commit 再提交、SHA 又变」的死循环。因此仓库里**只含纯插件本体**。
+本机实测印证：直连 `raw.githubusercontent.com` 与 `cdn.jsdelivr.net/gh/` 全部 `ECONNRESET`，
+而 `registry.npmjs.org` ping 200、`registry.npmmirror.com` 302。**自托管 raw URL 索引在这种
+网络下根本拉不到，只有 npm 分发的索引稳。**
 
----
+所以走 npm 发布是唯一能同时解决「进官方索引」和「索引可被拉取」的路径。
 
-## 二、市场索引（已生成，位于 `../market-submission/`）
+## 发布前的状态（已全部就绪）
 
-`market-index.json` 已经生成并通过 format 1 权威校验（复刻官方
-`parseMarketIndex` 全部规则逐条验证），**无需再填占位**——它已含：
-
-1. **仓库 URL**：`https://github.com/dadazhangn/dsh-prompt-snippets`
-2. **commit SHA**：`80ecacd85c78201aa2354ac39c33f336c03ecc4c`（**v1.0.0 代码提交**，已推送；
-   该提交的 `package.json` version 为 `1.0.0`，与索引条目一致）
-3. **publishTimestamp**：`1793090155`（Unix 秒）
-
-> ⚠️ SHA 选取规则：市场索引的 `commit` 必须指向**与 `version` 对应的代码提交**，
-> 不能随便取 `master` 的 HEAD。当前 `master` 的 HEAD 是 `a8d4097`（纯文档提交），
-> 若把索引指向它，安装出来的仍是 `version: 1.0.0` 的包，但版本记录会误导。
->
-> **v1.1.0 尚未发布**：本地工作区有未提交的 v1.1 改动（`index.js` / `client.js` /
-> `README.md` / `ROADMAP.md` / `package.json`）。按既定原则，等 PR #9994 合并后
-> 再 commit + push + 升版本，届时索引需新增一条 `1.1.0` 版本记录
-> （`commit` 换成新的 40 位 SHA，`publishTimestamp` 换成当时的 Unix 秒）。
-
----
-
-## 三、安装方式（对最终用户）
-
-市场安装器会根据 `source` 字段生成安装参数（见
-`marketInstallTarget`，`@deepseek-ai/dsh-plugin-market-index`）：
-
-- 本次为 **git source**，最终安装 spec 形如：
-  ```
-  git+https://github.com/USERNAME/dsh-prompt-snippets.git#<40-hex-commit>
-  ```
-- 若插件放在仓库子目录（monorepo），在 `source` 加 `"path": "子目录"`，
-  安装器会自动追加 `&path:/子目录`。
-
-本地验证安装（推到 GitHub 前可先用本地目录）：
-
-```
-dsh plugin --profile web add link:/绝对路径/dsh-prompt-snippets
-```
-
-> 注意：**仓库根目录就是插件本体**，没有 `prompt-snippets/` 子目录。
-> 所以 `dsh plugin add ./prompt-snippets` 这类写法会失败；路径必须直接指到含
-> `package.json` 的那一层。
-
----
-
-## 四、市场索引 JSON 校验要点（format 1）
-
-生成/修改后建议自检（关键规则已逐条对照 `parseMarketIndex` 源码）：
-
-- 顶层 `format` 必须是 `1`；`title` 必须含 `en`（我们用了 `{en, zh}`）。
-- `plugins` 非空，`name` 唯一、符合 npm 包名规则（`dsh-prompt-snippets` ✓）。
-- `versions` 非空，`version` 精确 SemVer（当前 `1.1.0`），同插件版本不重复。
-- `publishTimestamp` 为 Unix 秒整数，范围 `[0, 10^11)`（`1793090155` ✓）。
-- **git source**：`url` 必须 https、canonical、至少两段 path、非 tarball；
-  `commit` 必须 40 位小写 hex。
-- `engines.dsh` 必须合法 SemVer range（`>=0.2.1-rc.3` ✓，基于当前 DSH
-  版本 `0.2.1-rc.3`；禁止 `workspace:` 前缀）。
-- `icon` 用 data URL 时仅支持 SVG/PNG/JPEG/WebP base64，解码后 ≤32 KiB
-  （我们的 icon 内联 base64，远小于上限 ✓）。
-- `repository.url` 必须 http/https，无 query/fragment；`homepage` 同理。
-- 索引里声明的 `category` 必须在顶层 `metadata.categories` 里预先声明
-  （我们声明了 `productivity`、`prompting`，plugin 用 `prompting` ✓）。
-- **`publishTimestamp` 只用于排序展示**，不参与安装解析；但 `versions` 数组需按时间递增，
-  新版本追加在末尾，旧版本不要删（用户可能锁在旧版本上）。
-
----
-
-## 五、发布步骤（按顺序）
-
-### v1.0.0（已发布，PR #9994）
-
-1. 本地验证：`dsh plugin --profile web add link:/绝对路径/dsh-prompt-snippets`，
-   重启/刷新页面，输入框下方应出现「📋 片段库」；`/snippet add`、`/snippet list` 往返正常。
-2. 建 GitHub 仓库 `dsh-prompt-snippets`，把上面结构的所有文件（纯插件本体）推上去。
-3. 确认线上 HEAD 与本地一致后，`../market-submission/market-index.json` 里的
-   commit SHA 即为有效值（不一致则用 `git rev-parse HEAD` 更新）。
-4. 把 `../market-submission/market-index.json` 提交给市场维护方（或按市场约定
-   的提交流程挂到指定位置），由其合入市场索引。
-
-### v1.1.0（本地就绪，等 PR #9994 合并后执行）
-
-> 前置条件：PR #9994 被合并。此前**不 commit、不 push、不升版本**，
-> 避免与维护者的审阅基线冲突。
-
-1. `node --check index.js && node --check client.js` 两文件通过。
-2. 跑全量测试（四套件 **253 条**）全绿，且真实 `snippets.json` 的
-   `LastWriteTime` 前后不变。
-3. `git add -A && git commit -m "feat: v1.1.0 数据可靠性 + 面板内编辑 + 占位符表单"`。
-4. `git push origin master`，`git rev-parse HEAD` 取新 SHA。
-5. 更新 `../market-submission/market-index.json`：在 `versions` 数组末尾追加
-   ```json
-   { "version": "1.1.0", "publishTimestamp": <当前 Unix 秒>,
-     "source": { "type": "git", "url": "https://github.com/dadazhangn/dsh-prompt-snippets",
-                 "commit": "<新 40 位 SHA>" },
-     "engines": { "dsh": ">=0.2.1-rc.3" } }
-   ```
-6. 提交索引更新给市场维护方。
-
-### 可选（不影响发布）
-
-- 在 `package.json` 增补 `"author"`、`"license"`、`"homepage"` 等元数据，
-  并补一份 `LICENSE`（若补，需同步加进 `package.json` 的 `files` 与仓库）。
-
----
-
-## 六、当前插件文件清单（v1.1.0）
-
-| 文件 | 说明 |
+| 项 | 值 |
 |---|---|
-| `index.js` | host 半（1347 行）：`/snippet add·list·show·rm·undo·mv·optimize` 七个命令 + `/prompt-snippets` RPC（10 个端点）+ 本机 JSON 持久化（原子写、fsync、串行队列、损坏自愈、v1/v2→v3 迁移含 pre-v3 备份） |
-| `client.js` | client 半（1357 行）：`conversation.composer.dock` 注册「📋 片段库」面板，含分类分组、搜索、行内编辑/新建、冲突横幅、占位符表单、最近 5 条撤销、主题 token、窄屏自适应 |
-| `package.json` | bundle 声明（`dsh.bundle.patch` + `dsh.client`），version `1.1.0` |
-| `cordis.patch.yml` | 插入 host 半的 loader patch |
-| `locale/{en,zh}.json` | 市场显示名/描述 |
-| `icon.svg` | 图标 |
-| `README.md` | 使用说明 |
-| `ROADMAP.md` | 技术路线（v1.1 详细设计 + v1.2/1.3/2.0 概要） |
-| `PUBLISH.md` | 发布清单（本文件） |
-| `../market-submission/market-index.json` | 市场索引（独立于仓库，不随包分发） |
+| 包名 | `dsh-prompt-snippets`（registry 返回 404，未被占用） |
+| 版本 | `1.1.0` |
+| `private` | 已移除 |
+| `license` | MIT（`LICENSE` 已加） |
+| `publishConfig` | `access: public`，`registry: https://registry.npmjs.org/` |
+| `engines.dsh` | `>=0.2.1-rc.3` |
+| `files` | 9 个文件，31146 B tarball / 106472 B 解包 |
+| 自测 | 253 条断言全通，真实数据零接触 |
 
-### 命令一览
+`npm pack --dry-run` 的实际内容：
 
 ```
-/snippet add <名称> <内容> [--cat=<分类>]   保存或更新
-/snippet list                              列出全部（按分类分组）
-/snippet show <名称|#id前缀>                查看正文与变量
-/snippet rm <名称|#id前缀>                  软删除（可撤销）
-/snippet undo <名称|#id前缀>                恢复软删除
-/snippet mv <旧名> <新名>                    改名
-/snippet optimize <名称>                    用默认模型优化（结果显示在对话）
+LICENSE 1067 · README.md 7785 · client.js 49040 · cordis.patch.yml 70
+icon.svg 235 · index.js 46507 · locale/en.json 163 · locale/zh.json 160
+package.json 1445
 ```
 
-`--cat` / `-c` **只认行尾**：正文中间的 `--cat` 按字面保留；要在正文结尾真的写
-`--cat`，用 `--` 终止符（`/snippet add 说明 结尾是 -- --cat`）。
+`ROADMAP.md` 与 `PUBLISH.md` 不打包（不在 `files` 里）。
+
+## 发布步骤
+
+### 1. 登录 npm（需要你自己做，我没法代劳）
+
+```powershell
+cd C:\Users\20884\Desktop\dsh\prompt-snippets
+& 'D:\nodejs\npm.cmd' login
+```
+
+当前 `npm whoami` 报 `ENEEDAUTH`，即本机没有 npm 凭据。`~/.npmrc` 里也没有 token 行。
+
+如果浏览器登录不方便，用 token 方式（token 在 https://www.npmjs.com/settings/dadazhangn/tokens
+生成，选 Automation 类型）：
+
+```powershell
+& 'D:\nodejs\npm.cmd' config set //registry.npmjs.org/:_authToken=<TOKEN>
+```
+
+### 2. 确认身份与包名可用
+
+```powershell
+& 'D:\nodejs\npm.cmd' whoami          # 应输出 dadazhangn
+& 'D:\nodejs\npm.cmd' view dsh-prompt-snippets version   # 应报 404
+```
+
+### 3. 提交代码并打 tag
+
+发布前必须先把 `package.json` / `README.md` / `LICENSE` 的改动提交，否则 npm 上的
+tarball 与 GitHub 上的 commit 对不上，市场里 `repository` 与 `source` 也会不一致。
+
+```powershell
+cd C:\Users\20884\Desktop\dsh\prompt-snippets
+git add -A
+git commit -m "chore: publish to npm (license, engines, publishConfig, install docs)"
+$t = (& 'D:\GitHub CLI\gh.exe' auth token).Trim()
+git push "https://x-access-token:$t@github.com/dadazhangn/dsh-prompt-snippets.git" master
+git tag v1.1.0
+git push "https://x-access-token:$t@github.com/dadazhangn/dsh-prompt-snippets.git" v1.1.0
+```
+
+> push 必须用 token URL：`git-credential-manager` 在沙箱里起不来，会报
+> `couldn't create signal pipe, Win32 error 5` + `could not read Username`。
+
+### 4. 发布
+
+```powershell
+& 'D:\nodejs\npm.cmd' publish
+```
+
+`private` 已移除、`publishConfig.access` 是 `public`，直接发即可。
+
+### 5. 验证线上包
+
+```powershell
+& 'D:\nodejs\npm.cmd' view dsh-prompt-snippets version
+& 'D:\nodejs\npm.cmd' view dsh-prompt-snippets dist.tarball
+```
+
+再跑一次真实安装（用临时 DSH_HOME，不要污染现有 profile）：
+
+```powershell
+$env:DSH_HOME = "$env:TEMP\dsh-vtest"
+& 'D:\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd' plugin --profile vtest add dsh-prompt-snippets
+& 'D:\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd' plugin --profile vtest --dump-config
+```
+
+期望看到 `+ dsh-prompt-snippets 1.1.0` 与 `- id: prompt-snippets / name: dsh-prompt-snippets`。
+验证完删掉 `$env:TEMP\dsh-vtest`。
+
+### 6. 让索引收录
+
+npm 发布后还需要两步，因为索引由 `awesome-dsh-plugin` 的 `data/npm-map.json` 驱动：
+
+1. **往 `data/npm-map.json` 加映射**。当前该文件 152 条记录里没有我们这条。字段形状是
+   URL → `{ npm, publishedAt }`：
+   ```json
+   "https://github.com/dadazhangn/dsh-prompt-snippets": {
+     "npm": "dsh-prompt-snippets",
+     "publishedAt": <npm 发布时间的 Unix 秒>
+   }
+   ```
+   `publishedAt` 必须与 npm registry 上的 `time[version]` 一致，否则 `buildMarketIndex`
+   产出的 `publishTimestamp` 与真实发布时间对不上。取法：
+   ```powershell
+   & 'D:\nodejs\npm.cmd' view dsh-prompt-snippets time --json
+   ```
+
+2. **提 PR** 到 `awesome-dsh-plugin/awesome-dsh-plugin`，改这一个文件即可。PR #9994 已经
+   合并了插件条目 YAML，所以只需要补 npm 映射这一处。合并后 CI 重建
+   `docs/index.json` → 发布 `dsh-plugin-catalog` → 两个站点与「发现」标签页同时生效。
+
+> 注意：条目 YAML 里 `category` 是 `ui`，而本地 `market-submission/market-index.json`
+> 用的是 `prompting`。以已合并的 YAML 为准，改索引时别把分类改回去。
+
+## 兜底方案（npm 走不通时）
+
+如果 npm 发布暂时不可行，可以用自己的索引 URL。但有两个硬约束：
+
+1. **Host 拒绝重定向**（`plugin-market/README.zh.md`：拒绝重定向，只能经重定向访问的索引
+   必须以其最终 URL 配置）。
+2. **索引必须在 15 秒内取到**（`fetchTimeoutMs` 默认 `15000`），国内网络下
+   `raw.githubusercontent.com` / `cdn.jsdelivr.net/gh/` 都会超时或被 RST。
+
+可行的托管位置（都必须可直连、无重定向）：自己的服务器、对象存储（OSS/COS/R2）的公开 URL、
+或 gitee 之类国内可达的静态托管。索引内容就是 `market-submission/market-index.json`
+（format 1，已过 `_verify-index.mjs` 权威校验），它同时带 git source 的 commit SHA，
+所以 **git-only 插件在自己的索引里是合法的** —— 限制只存在于 awesome 的构建脚本里。
+
+用户侧的配置路径：**插件 → 发现 → 索引源 → 添加索引源**，粘贴该 URL。
+
+## 时间戳陷阱
+
+`Get-Date -UFormat %s` 在 PowerShell 里会差 +8 小时（返回本地时间当 UTC 用）。
+取真实 Unix 秒用：
+
+```powershell
+git show -s --format=%ct HEAD     # commit 时间
+& 'D:\nodejs\npm.cmd' view dsh-prompt-snippets time --json   # npm 发布时间
+```

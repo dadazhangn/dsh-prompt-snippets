@@ -1,16 +1,51 @@
 {
   "name": "dsh-prompt-snippets",
   "version": "1.1.0",
-  "private": true,
   "type": "module",
-  "description": "保存并一键插入可复用的提示词片段，支持分类与 {{占位符}}。",
+  "description": "Save reusable prompt snippets with categories and {{placeholders}}, insert them into the composer from a draggable dock, and refine them with the default model.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek",
+    "harness",
+    "prompt",
+    "snippet",
+    "template",
+    "placeholder"
+  ],
+  "license": "MIT",
+  "author": "dadazhangn",
+  "homepage": "https://github.com/dadazhangn/dsh-prompt-snippets",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dadazhangn/dsh-prompt-snippets.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dadazhangn/dsh-prompt-snippets/issues"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
-    "./icon": "./icon.svg"
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
   },
-  "files": ["index.js", "client.js", "cordis.patch.yml", "locale/*.json", "icon.svg", "README.md"],
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

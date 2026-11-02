@@ -7,14 +7,18 @@
 
 ## 安装
 
-本仓库根目录就是插件本体，直接从 GitHub 安装：
-
 ```bash
-dsh plugin --profile web add github:dadazhangn/dsh-prompt-snippets
+dsh plugin --profile web add dsh-prompt-snippets
 ```
 
 `web` 换成你实际使用的 profile 名即可（本机 profile 在 `~/.dsh/profiles/<名字>`）。
 装完重启 DSH，刷新页面，输入框下方会出现「📋 片段库」按钮。
+
+也可以从 GitHub 装（版本由仓库 HEAD 决定，不跟随 npm 发布）：
+
+```bash
+dsh plugin --profile web add github:dadazhangn/dsh-prompt-snippets
+```
 
 本地源码调试用路径安装：
 
@@ -25,11 +29,12 @@ dsh plugin --profile web add link:C:/path/to/dsh-prompt-snippets
 ### Install (English)
 
 ```bash
-dsh plugin --profile web add github:dadazhangn/dsh-prompt-snippets
+dsh plugin --profile web add dsh-prompt-snippets
 ```
 
-This repository root *is* the plugin bundle; install straight from GitHub with the
-command above, then restart DSH and reload the page.
+Or install straight from GitHub (`github:dadazhangn/dsh-prompt-snippets`), which
+tracks the repository HEAD instead of the published npm version. Then restart DSH
+and reload the page.
 
 ## 功能
 
@@ -130,11 +135,18 @@ bundle 结构：host 半（`index.js`，命令 + RPC + JSON 存储）、client �
 ```
 index.js            host 半：/snippet 命令 + /prompt-snippets RPC + JSON 持久化
 client.js           client 半：conversation.composer.dock 面板
-package.json        bundle 声明（dsh.bundle.patch + dsh.client）
+package.json        bundle 声明（dsh.bundle.patch + dsh.client + engines.dsh）
 cordis.patch.yml    插入 host 半的 loader patch
 locale/{en,zh}.json 市场显示名与描述
 icon.svg            图标
+LICENSE             MIT
 ```
+
+## 兼容性
+
+要求 DSH `>=0.2.1-rc.3`（`package.json` 的 `engines.dsh`）。市场在安装前会按这条
+检查宿主版本，不满足时禁用「安装」按钮并说明原因。
+
 
 ## 测试
 
