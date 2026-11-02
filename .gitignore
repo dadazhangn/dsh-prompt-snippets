@@ -1,2 +1,7 @@
-﻿node_modules/
+node_modules/
 *.log
+
+# 内部工作文档：不含插件运行时所需内容，且含本机绝对路径与发布凭据流程，
+# 只保留在本地，不随仓库与 npm 包分发。
+ROADMAP.md
+PUBLISH.md
