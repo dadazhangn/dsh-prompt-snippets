@@ -72,15 +72,18 @@ cd C:\Users\20884\Desktop\dsh\prompt-snippets
 & 'D:\nodejs\npm.cmd' view dsh-prompt-snippets version   # 应报 404
 ```
 
-### 3. 提交代码并打 tag
+### 3. ~~提交代码并打 tag~~ ✅ 已完成
 
-发布前必须先把 `package.json` / `README.md` / `LICENSE` 的改动提交，否则 npm 上的
-tarball 与 GitHub 上的 commit 对不上，市场里 `repository` 与 `source` 也会不一致。
+提交 `bd616e8df8f7d987229d6c22563038f5a9508436`
+（`chore: prepare npm publish (license, engines, publishConfig, install docs)`），
+已推送到 `origin/master`，tag `v1.1.0` 已推送并确认指向同一 commit。
+
+命令留档（本次已执行）：
 
 ```powershell
 cd C:\Users\20884\Desktop\dsh\prompt-snippets
 git add -A
-git commit -m "chore: publish to npm (license, engines, publishConfig, install docs)"
+git commit -m "chore: prepare npm publish (license, engines, publishConfig, install docs)"
 $t = (& 'D:\GitHub CLI\gh.exe' auth token).Trim()
 git push "https://x-access-token:$t@github.com/dadazhangn/dsh-prompt-snippets.git" master
 git tag v1.1.0
@@ -89,6 +92,9 @@ git push "https://x-access-token:$t@github.com/dadazhangn/dsh-prompt-snippets.gi
 
 > push 必须用 token URL：`git-credential-manager` 在沙箱里起不来，会报
 > `couldn't create signal pipe, Win32 error 5` + `could not read Username`。
+> msys 的 `fatal error - couldn't create signal pipe` 仍会打印在 stdout，但推送本身成功
+> （看 `e2d70db..bd616e8  master -> master` 那行）。
+
 
 ### 4. 发布
 
@@ -110,11 +116,24 @@ git push "https://x-access-token:$t@github.com/dadazhangn/dsh-prompt-snippets.gi
 ```powershell
 $env:DSH_HOME = "$env:TEMP\dsh-vtest"
 & 'D:\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd' plugin --profile vtest add dsh-prompt-snippets
-& 'D:\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd' plugin --profile vtest --dump-config
+& 'D:\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd' --profile vtest --dump-config
 ```
 
-期望看到 `+ dsh-prompt-snippets 1.1.0` 与 `- id: prompt-snippets / name: dsh-prompt-snippets`。
+注意 `--dump-config` 是 **dsh 顶层**的参数，不是 `plugin` 子命令的（`dsh plugin --dump-config`
+会报 `Unknown option`）。期望看到：
+
+```
+> # == dsh-prompt-snippets
+> - id: prompt-snippets
+>   name: dsh-prompt-snippets
+```
+
 验证完删掉 `$env:TEMP\dsh-vtest`。
+
+> 上面这套「装 tarball → 校验 7 个源文件 SHA256 与仓库逐一致 → `--dump-config` 出现
+> `id: prompt-snippets`」已在本次用 `npm pack` 产出的 `dsh-prompt-snippets-1.1.0.tgz`
+> 完整跑通过一次，临时环境已清理。
+
 
 ### 6. 让索引收录
 
