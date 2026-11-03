@@ -350,7 +350,9 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   check("展开行内编辑器", eTxt.includes("名称") && eTxt.includes("正文（用 {{变量名}} 标记占位符，\\{{ 输出字面量）"));
   check("编辑器带出原值", allNodes(panelOf(t)).some((n) => n?.props?.value === "带必填"));
   check("编辑器列出变量", eTxt.includes("{{代码}}") && eTxt.includes("{{关注点}}"));
-  const reqBox = allNodes(panelOf(t)).find((n) => n?.props?.type === "checkbox");
+  // 编辑器里现在有多个 checkbox（收藏置顶 + 每个变量的必填），必须按「checked 为 true」定位
+  // 必填的那个，否则会误取到收藏置顶那个未勾选的。
+  const reqBox = allNodes(panelOf(t)).find((n) => n?.props?.type === "checkbox" && n?.props?.checked === true);
   check("必填勾选框反映原状态", reqBox?.props?.checked === true);
 
   // 改名后保存，payload 必须带 id + expectedRevision
@@ -370,7 +372,74 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   check("保存后编辑器收起", !flat(panelOf(t)).filter((x) => typeof x === "string").includes("名称"));
 }
 
-// ══════════ §2.4 冲突 / 新建 / 多条撤销 / 脏草稿保护 ══════════
+// ══════════ 动态变量 {{date}}/{{time}}/{{datetime}} ══════════
+{
+  const DYN = {
+    id: "dyn",
+    name: "日报",
+    category: "写作",
+    content: "今天是 {{date}} {{time}}，请总结：{{要点}}",
+    variables: {},
+    revision: 1,
+    deletedAt: null,
+  };
+  const ONLY_DYN = {
+    id: "onlydyn",
+    name: "纯日期",
+    category: null,
+    content: "{{datetime}}",
+    variables: {},
+    revision: 1,
+    deletedAt: null,
+  };
+  fakeRpc.call = (channel, endpoint, payload) => {
+    calls.push({ channel, endpoint, payload });
+    if (endpoint === "list") return Promise.resolve({ ok: true, value: { version: 4, snippets: [DYN, ONLY_DYN] } });
+    return Promise.resolve({ ok: false, error: { code: "x", message: "unknown" } });
+  };
+  const tick = () => new Promise((r) => setImmediate(r));
+  // 关→开强制触发 load()，拿新数据
+  let t = rerender(registered.Component, props);
+  if (t.children.find((c) => c?.props?.id === "ps-panel")) {
+    t.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+    t = rerender(registered.Component, props);
+  }
+  t.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+  await tick();
+  t = rerender(registered.Component, props);
+  const pnl = () => t.children.find((c) => c?.props?.id === "ps-panel");
+  const dynBtn = flat(pnl()).find((n) => n?.props?.onClick && Array.isArray(n.children) && n.children.includes("日报"));
+  inserted.length = 0;
+  dynBtn.props.onClick();
+  // 日报含动态变量 date/time + 用户变量「要点」→ 应弹表单（要点无元数据）
+  t = rerender(registered.Component, props);
+  let dynTxt = flat(pnl()).filter((x) => typeof x === "string");
+  check("动态变量 + 用户变量 → 弹表单", dynTxt.some((x) => x.includes("填写「日报」的占位符")), dynTxt.join("|"));
+  // 表单里不列动态变量，只列「要点」
+  check("表单不列 date/time 动态变量", !dynTxt.some((x) => x.includes("{{date}}") || x.includes("{{time}}")), dynTxt.join("|"));
+  check("表单列出用户变量要点", dynTxt.some((x) => x.includes("要点")));
+
+  // 纯动态变量片段 → 直插（不弹表单），内容被实时替换
+  // 先关面板再开以刷新
+  t = rerender(registered.Component, props);
+  if (t.children.find((c) => c?.props?.id === "ps-panel")) {
+    t.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+    t = rerender(registered.Component, props);
+  }
+  if (!t.children.find((c) => c?.props?.id === "ps-panel")) {
+    t.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+    t = rerender(registered.Component, props);
+  }
+  const onlyBtn = flat(t.children.find((c) => c?.props?.id === "ps-panel")).find(
+    (n) => n?.props?.onClick && Array.isArray(n.children) && n.children.includes("纯日期")
+  );
+  inserted.length = 0;
+  onlyBtn.props.onClick();
+  check("纯动态变量 → 直插不弹表单", inserted.length === 1, inserted.join("|"));
+  check("datetime 被实时替换为时间戳", /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(inserted[0]), inserted[0]);
+  check("纯动态变量直插后发 touch", calls.some((c) => c.endpoint === "touch" && c.payload?.ids?.[0] === "onlydyn"));
+}
+
 {
   const S1 = {
     id: "a",
@@ -610,6 +679,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   const expCalls = calls.filter((c) => c.endpoint === "export");
   check("点击导出调用 export 端点", expCalls.length === before + 1, String(expCalls.length));
   check("导出请求带 write 触发落盘", expCalls.at(-1)?.payload?.write === "", JSON.stringify(expCalls.at(-1)?.payload));
+  check("导出请求带 reveal 一键打开", expCalls.at(-1)?.payload?.reveal === true, JSON.stringify(expCalls.at(-1)?.payload));
 
   const t2 = rerender(registered.Component, props);
   const p2 = t2.children.find((c) => c?.props?.id === "ps-panel");
@@ -617,6 +687,14 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
     (n) => n?.props?.style?.fontFamily?.includes("monospace") && flat(n).some((x) => String(x).includes(".json"))
   );
   check("导出成功后显示落盘路径", !!pathText, flat(p2).filter((x) => typeof x === "string").join("|"));
+  // 落盘路径旁有「打开」按钮，点击它发 revealPath 而不是重新 write（不覆盖导出文件）
+  const openBtn = flat(p2).find((n) => n?.props?.onClick && flat(n).includes("打开"));
+  check("导出路径旁有「打开」按钮", !!openBtn);
+  openBtn?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const revealCall = calls.filter((c) => c.endpoint === "export" && c.payload?.revealPath);
+  check("点打开发 revealPath 请求", revealCall.length >= 1, JSON.stringify(revealCall.at(-1)?.payload));
+  check("点打开不重复 write（不覆盖导出文件）", revealCall.at(-1)?.payload?.write === undefined, JSON.stringify(revealCall.at(-1)?.payload));
 }
 
 // —— §3.3 导出失败降级 ——
@@ -1198,6 +1276,146 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   x = rerender(registered.Component, props);
   const p2 = panelOf(x);
   check("重开后读回自定义尺寸", p2?.props?.style?.width === "420px", String(p2?.props?.style?.width));
+}
+
+// ── v1.3 标签 / 收藏 / 视图切换 / 版本历史 ──
+{
+  const V13_DATA = [
+    { id: "a", name: "甲", category: "开发", content: "内容甲", pinned: true, tags: ["常用", "代码"], revision: 1, lastUsedAt: 30, updatedAt: 30, deletedAt: null },
+    { id: "b", name: "乙", category: "写作", content: "内容乙", pinned: false, tags: [], revision: 1, lastUsedAt: 100, updatedAt: 100, deletedAt: null },
+    { id: "c", name: "丙", category: "开发", content: "内容丙", pinned: false, tags: ["审查"], revision: 1, lastUsedAt: 5, updatedAt: 5, deletedAt: null },
+  ];
+  const realCall = fakeRpc.call;
+  fakeRpc.call = (channel, endpoint, payload) => {
+    calls.push({ channel, endpoint, payload });
+    if (endpoint === "list") return Promise.resolve({ ok: true, value: { version: 4, snippets: V13_DATA } });
+    if (endpoint === "history") return Promise.resolve({ ok: true, value: { id: payload.id, history: [{ name: "旧", content: "旧内容", revision: 0, at: 123 }] } });
+    if (endpoint === "touch") return Promise.resolve({ ok: true, value: {} });
+    return Promise.resolve({ ok: false, error: { code: "x", message: "unknown" } });
+  };
+  const reload13 = async () => {
+    let x = rerender(registered.Component, props);
+    if (x.children.find((c) => c?.props?.id === "ps-panel")) {
+      x.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+      x = rerender(registered.Component, props);
+    }
+    x.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+    await new Promise((r) => setImmediate(r));
+    return rerender(registered.Component, props);
+  };
+  const panelOf13 = (t) => t.children.find((c) => c?.props?.id === "ps-panel");
+  const textsOf13 = (t) => flat(t).filter((x) => typeof x === "string");
+  const findViewBtn = (t, txt) => flat(t).find((n) => n?.props?.className === "ps-view" && Array.isArray(n.children) && n.children.some((c) => c === txt));
+
+  let x = await reload13();
+  const viewBtns = flat(x).filter((n) => n?.props?.className === "ps-view");
+  check("v1.3 视图栏渲染三个按钮", viewBtns.length === 3, String(viewBtns.length));
+
+  // 行内：收藏星 + 标签 chip
+  const star = flat(x).find((n) => n?.props?.style?.color === "var(--dsw-alias-state-warn-primary)" && typeof n?.props?.onClick !== "function" && n?.children?.includes?.("★ "));
+  check("v1.3 收藏片段显示 ★", !!star, flat(x).filter((n) => n?.children?.includes?.("★")).length ? "has-star" : "no-star");
+  const chips = flat(x).filter((n) => n?.props?.style?.maxWidth === "90px" && n?.props?.style?.borderRadius === "999px");
+  check("v1.3 标签以 chip 渲染", chips.length >= 3, String(chips.length));
+
+  // 视图切换：收藏
+  findViewBtn(x, "★ 收藏")?.props?.onClick?.();
+  x = rerender(registered.Component, props);
+  let t13 = textsOf13(x);
+  check("v1.3 收藏视图只显示置顶项", t13.includes("甲") && !t13.includes("乙") && !t13.includes("丙"), t13.filter((s) => s.length < 5).join("|"));
+
+  // 视图切换：最近使用（按 lastUsedAt 降序）
+  findViewBtn(x, "最近使用")?.props?.onClick?.();
+  x = rerender(registered.Component, props);
+  const items = flat(panelOf13(x)).filter((n) => n?.props?.className === "ps-item");
+  const order = items.map((n) => (n.children || []).filter((c) => typeof c === "string").join(""));
+  check("v1.3 最近使用按 lastUsedAt 降序", order.length === 3 && order[0] === "乙" && order[2] === "丙", order.join(","));
+
+  // 视图切换回全部
+  findViewBtn(x, "全部")?.props?.onClick?.();
+  x = rerender(registered.Component, props);
+
+  // 版本历史面板
+  const histBtn = flat(x).find((n) => n?.props?.["aria-label"] === "历史「甲」");
+  check("v1.3 行内有历史按钮", !!histBtn);
+  histBtn?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  x = rerender(registered.Component, props);
+  const histTexts = textsOf13(x);
+  check("v1.3 历史面板渲染标题", histTexts.includes("历史版本 ·「甲」"));
+  check("v1.3 历史面板列出旧版本内容", histTexts.includes("旧内容"));
+  const histCalls = calls.filter((c) => c.endpoint === "history");
+  check("v1.3 历史走 history 端点", histCalls.length >= 1 && histCalls[0].payload.id === "a");
+
+  fakeRpc.call = realCall;
+}
+
+// ── v1.3 命令面板：全局快捷唤起 Ctrl+Shift+K / Ctrl+Shift+P ──
+{
+  const V13P_DATA = [
+    { id: "a", name: "甲", category: "开发", content: "内容甲", pinned: true, tags: ["常用"], revision: 1, lastUsedAt: 30, updatedAt: 30, deletedAt: null },
+    { id: "b", name: "乙", category: "写作", content: "内容乙", pinned: false, tags: [], revision: 1, lastUsedAt: 100, updatedAt: 100, deletedAt: null },
+  ];
+  const realCall = fakeRpc.call;
+  fakeRpc.call = (channel, endpoint, payload) => {
+    calls.push({ channel, endpoint, payload });
+    if (endpoint === "list") return Promise.resolve({ ok: true, value: { version: 4, snippets: V13P_DATA } });
+    if (endpoint === "touch") return Promise.resolve({ ok: true, value: {} });
+    return Promise.resolve({ ok: false, error: { code: "x", message: "unknown" } });
+  };
+  const reloadPalette = async () => {
+    let x = rerender(registered.Component, props);
+    if (x.children.find((c) => c?.props?.id === "ps-panel")) {
+      x.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+      x = rerender(registered.Component, props);
+    }
+    x.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+    await new Promise((r) => setImmediate(r));
+    return rerender(registered.Component, props);
+  };
+  const paletteOf = (t) => flat(t).find((n) => n?.props?.style?.position === "fixed" && n?.props?.style?.inset === 0);
+  const textsOfP = (t) => flat(t).filter((x) => typeof x === "string");
+  const inputOfP = (t) => flat(t).find((n) => n?.props?.placeholder?.includes("搜索片段"));
+
+  // 收集全局 keydown handler
+  const keyHandlers = [];
+  const realAdd = document.addEventListener;
+  const realRem = document.removeEventListener;
+  document.addEventListener = (type, fn) => { if (type === "keydown") keyHandlers.push(fn); };
+  document.removeEventListener = () => {};
+
+  let x = await reloadPalette();
+  // 触发挂载 keydown effect（reloadPalette 内部 rerender 已重跑 effect，但 test harness 不自动执行 effect）
+  // 手动执行所有 effect 来注册 keydown handler
+  for (const e of effects) { try { e.fn(); } catch (_) {} }
+  // 找到 Ctrl+Shift+K 的 handler
+  const openHandler = keyHandlers.find((fn) => fn.toString().includes("shiftKey"));
+  check("v1.3 命令面板注册了全局唤起快捷键", typeof openHandler === "function");
+
+  // 模拟 Ctrl+Shift+K
+  openHandler?.({ key: "k", ctrlKey: true, shiftKey: true, preventDefault: () => {} });
+  x = rerender(registered.Component, props);
+  const overlay = paletteOf(x);
+  check("v1.3 命令面板打开后渲染 overlay", !!overlay);
+  const pTexts = textsOfP(x);
+  check("v1.3 命令面板列出片段（收藏置顶）", pTexts.includes("甲") && pTexts.includes("乙"));
+
+  // 输入过滤
+  const pinput = inputOfP(x);
+  pinput?.props?.onChange?.({ target: { value: "乙" } });
+  x = rerender(registered.Component, props);
+  const pTexts2 = textsOfP(x);
+  check("v1.3 命令面板支持搜索过滤", pTexts2.includes("乙") && !pTexts2.includes("甲"));
+
+  // Enter 插入第一条
+  const pinput2 = inputOfP(x);
+  const beforeInserts = inserted.length;
+  pinput2?.props?.onKeyDown?.({ key: "Enter", preventDefault: () => {} });
+  await new Promise((r) => setImmediate(r));
+  check("v1.3 命令面板 Enter 插入命中片段", inserted.length === beforeInserts + 1);
+
+  document.addEventListener = realAdd;
+  document.removeEventListener = realRem;
+  fakeRpc.call = realCall;
 }
 
 console.log(results.join("\n"));

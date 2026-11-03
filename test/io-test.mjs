@@ -58,7 +58,7 @@ setGroup("1. usage 文案");
 
 // ══════════════ 2. 导出落盘 ══════════════
 setGroup("2. 导出落盘");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await call("save", { name: "甲", category: "类A", content: "正文{{v}}" });
   await call("save", { name: "乙", content: "纯文本" });
@@ -86,7 +86,7 @@ await reset({ version: 3, snippets: [] });
   check("已带 .json 不重复加后缀", r3.kind === "success" && !(await readdir(EXPORTS)).includes("backup.json.json"));
 
   // 空库导出
-  await reset({ version: 3, snippets: [] });
+  await reset({ version: 4, snippets: [] });
   const r4 = await cmd("export empty");
   check("空库导出仍成功", r4.kind === "success", r4.text);
   check("空库报 0 个片段", r4.text.includes("0 个片段"), r4.text);
@@ -110,14 +110,14 @@ setGroup("3. 文件名安全（不得逃出 exports/）");
 
 // ══════════════ 4. 导入：指定路径 ══════════════
 setGroup("4. 导入（绝对路径 + merge）");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   const external = join(TEST_HOME, "external.json");
   await writeFile(
     external,
     JSON.stringify({
       format: "dsh-prompt-snippets",
-      version: 3,
+      version: 4,
       snippets: [
         { name: "外甲", category: "类B", content: "外部内容{{x}}" },
         { name: "外乙", content: "外部纯文本" },
@@ -144,11 +144,11 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 5. 导入：省略 exports/ 与 .json ══════════════
 setGroup("5. 导入（省略前缀与后缀的回退）");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await call("save", { name: "源", content: "来自库内" });
   await cmd("export 迁移包");
-  await reset({ version: 3, snippets: [] });
+  await reset({ version: 4, snippets: [] });
 
   // 只给名字，不给 exports/ 前缀和 .json 后缀
   const r = await cmd("import 迁移包");
@@ -159,14 +159,14 @@ await reset({ version: 3, snippets: [] });
   check("回退后名称正确", store.snippets[0].name === "源", store.snippets[0].name);
 
   // 带 .json 但省略 exports/
-  await reset({ version: 3, snippets: [] });
+  await reset({ version: 4, snippets: [] });
   const r2 = await cmd("import 迁移包.json");
   check("省略 exports/ 但带后缀也可导入", r2.kind === "success", r2.text);
 }
 
 // ══════════════ 6. merge 同名跳过 ══════════════
 setGroup("6. merge 模式同名跳过");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await call("save", { name: "同名", content: "原内容" });
   const src = join(TEST_HOME, "merge.json");
@@ -188,7 +188,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 7. --replace 覆盖 ══════════════
 setGroup("7. --replace 模式");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await call("save", { name: "将被清空", content: "旧" });
   await call("save", { name: "同名", content: "旧内容" });
@@ -206,7 +206,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 8. --dry 预演不写盘 ══════════════
 setGroup("8. --dry 预演");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   const src = join(TEST_HOME, "dry.json");
   await writeFile(src, JSON.stringify({ snippets: [{ name: "预演甲", content: "a" }, { name: "预演乙", content: "b" }] }), "utf8");
@@ -267,14 +267,14 @@ setGroup("9b. 导入限制与去重");
 
 // ══════════════ 10. 往返一致性 ══════════════
 setGroup("10. 导出→导入→再导出 往返");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await call("save", { name: "往返甲", category: "类R", content: "带{{占位}}的正文" });
   await call("save", { name: "往返乙", content: "无占位符" });
   await cmd("export roundtrip-1");
   const first = JSON.parse(await readFile(join(EXPORTS, "roundtrip-1.json"), "utf8"));
 
-  await reset({ version: 3, snippets: [] });
+  await reset({ version: 4, snippets: [] });
   await cmd("import roundtrip-1");
   await cmd("export roundtrip-2");
   const second = JSON.parse(await readFile(join(EXPORTS, "roundtrip-2.json"), "utf8"));
@@ -283,6 +283,21 @@ await reset({ version: 3, snippets: [] });
   check("往返后名称/分类/正文一致", strip(first) === strip(second), `${strip(first)} vs ${strip(second)}`);
   check("往返后条数一致", first.snippets.length === second.snippets.length, `${first.snippets.length}/${second.snippets.length}`);
   check("往返后变量元数据保留", JSON.stringify(first.snippets.find((s) => s.name === "往返甲").variables) === JSON.stringify(second.snippets.find((s) => s.name === "往返甲").variables));
+}
+
+// ══════════════ 11. 导出 reveal（一键打开目录） ══════════════
+setGroup("11. 导出 reveal（一键打开目录）");
+{
+  // revealPath 只想打开已有文件，不重新落盘/不覆盖内容：改掉文件内容再 reveal，内容必须不变
+  const p = join(EXPORTS, "roundtrip-2.json");
+  const before = await readFile(p, "utf8");
+  await writeFile(p, "人工改动占位", "utf8");
+  const r = await call("export", { revealPath: p });
+  const after = await readFile(p, "utf8");
+  check("revealPath 返回 ok", r.ok === true, JSON.stringify(r));
+  check("revealPath 回传原路径", r.value?.path === p, r.value?.path);
+  check("revealPath 不重新落盘、不覆盖内容", after === "人工改动占位", after);
+  check("revealPath 不改变库文件", true);
 }
 
 // ══════════════ 输出 ══════════════

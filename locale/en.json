@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Prompt Snippets",
-    "description": "Save and one-click insert reusable prompt snippets, with categories and {{placeholders}}."
+    "description": "Save and one-click insert reusable prompt snippets with categories, {{placeholder}} fill forms & dropdown enums, version history, and crash-safe local JSON storage."
   }
 }

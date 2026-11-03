@@ -48,6 +48,10 @@ window.__ModuleLoader__.load({
     // 坑二：elevation token 自带 0.5px 发丝描边，用了它就不能再写 border，否则双层轮廓。
     const tint = (pct) =>
       `color-mix(in srgb, var(--dsw-alias-label-primary) ${pct}%, transparent)`;
+    // 主操作按钮的品牌色叠层：没有 inverse/on-brand token，用 brand-primary 的半透明叠加
+    // 做「品牌色 tint 按钮」，与 ghost（透明底）拉开层次，又始终跟随主题。
+    const brandTint = (pct) =>
+      `color-mix(in srgb, var(--dsw-alias-brand-primary) ${pct}%, transparent)`;
     const C = {
       surface: "var(--dsw-alias-bg-layer-1)",
       surfaceAlt: tint(4),
@@ -66,10 +70,33 @@ window.__ModuleLoader__.load({
     const THEME_CSS = `
 .ps-panel, .ps-panel * { box-sizing: border-box; }
 
+/* 关键：面板整体（含边缘拖拽把手）标记为 no-drag。
+   DSH 是 frameless 窗口，顶部标题栏是 -webkit-app-region: drag 的拖拽区；
+   面板贴顶（与窗口上缘平齐）时，若不显式 no-drag，按在把手上的拖动会被
+   标题栏 drag 区域「穿透」接管，变成拖动整个 DSH 窗口而不是缩放面板。 */
+.ps-panel, .ps-panel * { -webkit-app-region: no-drag; }
+
+/* 交互反馈统一加过渡：颜色/背景/边框/阴影 110ms，避免 hover 瞬间跳变 */
+.ps-btn, .ps-icon, .ps-item, .ps-undo, .ps-close, .ps-view,
+.ps-primary, .ps-ghost, .ps-search, .ps-input, .ps-textarea {
+  transition: background-color 110ms ease, color 110ms ease, border-color 110ms ease, box-shadow 110ms ease;
+}
+
+/* 面板打开淡入（transform 只影响本面板，不参与宿主 dock 的居中重排） */
+.ps-panel { animation: ps-panel-in 120ms ease; }
+@keyframes ps-panel-in {
+  from { opacity: 0; transform: translateY(3px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
 .ps-btn:hover, .ps-icon:hover, .ps-item:hover, .ps-undo:hover,
 .ps-primary:hover, .ps-ghost:hover { background: ${C.surfaceHover} !important; }
+.ps-view:hover { background: ${C.surfaceHover} !important; }
+/* 主操作按钮：品牌色 tint，hover 加深，与 ghost 拉开层次 */
+.ps-primary { background: ${brandTint(14)} !important; border-color: ${brandTint(36)} !important; color: ${C.text} !important; }
+.ps-primary:hover { background: ${brandTint(22)} !important; border-color: ${brandTint(50)} !important; }
+.ps-close:hover { background: ${C.surfaceHover}; color: var(--dsw-alias-label-primary); }
 .ps-primary:disabled, .ps-ghost:disabled { background: transparent !important; }
-.ps-close:hover { color: var(--dsw-alias-label-primary); }
 
 /* 与 ui-theme focus.css 同语义：颜色回退到业务主色，pointer 模态由上游规则统一抑制 */
 .ps-btn:focus-visible, .ps-icon:focus-visible, .ps-item:focus-visible,
@@ -226,6 +253,161 @@ window.__ModuleLoader__.load({
         fontVariantNumeric: "tabular-nums",
         whiteSpace: "nowrap",
       },
+      // ── v1.3 标签 / 收藏 / 视图切换 / 版本历史 ──
+      tagChip: {
+        display: "inline-block",
+        fontSize: "10px",
+        lineHeight: 1,
+        padding: "2px 6px",
+        borderRadius: "999px",
+        background: C.surfaceHover,
+        color: C.textDim,
+        marginLeft: "4px",
+        verticalAlign: "middle",
+        maxWidth: "90px",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+      },
+      pinStar: { color: "var(--dsw-alias-state-warn-primary)", marginRight: "2px" },
+      viewBar: {
+        display: "flex",
+        alignItems: "center",
+        gap: "4px",
+        padding: "4px 8px",
+        borderBottom: "1px solid " + C.borderSubtle,
+        background: C.surfaceAlt,
+        flexShrink: 0,
+      },
+      viewBtn: {
+        border: "1px solid " + C.border,
+        background: "transparent",
+        color: C.textDim,
+        borderRadius: "999px",
+        padding: "2px 10px",
+        fontSize: "11px",
+        cursor: "pointer",
+        flexShrink: 0,
+      },
+      viewBtnActive: {
+        border: "1px solid " + C.border,
+        background: C.surfaceHover,
+        color: C.text,
+        borderRadius: "999px",
+        padding: "2px 10px",
+        fontSize: "11px",
+        cursor: "pointer",
+        flexShrink: 0,
+      },
+      groupStar: { color: "var(--dsw-alias-state-warn-primary)" },
+      historyWrap: {
+        padding: "0 8px 6px",
+        flexShrink: 0,
+        maxHeight: "60%",
+        overflow: "auto",
+      },
+      historyBox: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "4px",
+        padding: "8px",
+        margin: "2px 0 4px",
+        borderRadius: "6px",
+        border: "1px solid " + C.border,
+        background: C.surfaceAlt,
+      },
+      historyRow: {
+        display: "flex",
+        alignItems: "flex-start",
+        gap: "8px",
+        padding: "4px 0",
+        borderBottom: "1px solid " + C.borderSubtle,
+        fontSize: "11px",
+      },
+      historyMeta: { flexShrink: 0, color: C.textDim, minWidth: "52px", fontVariantNumeric: "tabular-nums" },
+      historyContent: {
+        flex: 1,
+        minWidth: 0,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        color: C.text,
+        maxHeight: "120px",
+        overflow: "auto",
+      },
+      // ── v1.3 命令面板（全局快捷唤起 overlay） ──
+      paletteOverlay: {
+        position: "fixed",
+        inset: 0,
+        zIndex: Z_TOP - 1,
+        background: "rgba(0,0,0,0.28)",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+      },
+      paletteBox: {
+        marginTop: "12vh",
+        width: "min(520px, calc(100vw - 32px))",
+        maxHeight: "min(420px, calc(100vh - 24vh))",
+        display: "flex",
+        flexDirection: "column",
+        borderRadius: "10px",
+        border: "1px solid " + C.border,
+        background: C.surface,
+        boxShadow: "0 12px 40px rgba(0,0,0,0.32)",
+        overflow: "hidden",
+      },
+      paletteInput: {
+        border: "none",
+        borderBottom: "1px solid " + C.borderSubtle,
+        background: "transparent",
+        color: C.text,
+        fontSize: "14px",
+        padding: "12px 14px",
+        outline: "none",
+        fontFamily: "inherit",
+      },
+      paletteList: { overflowY: "auto", padding: "6px", flex: 1 },
+      paletteRow: {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        width: "100%",
+        border: "1px solid transparent",
+        background: "transparent",
+        color: C.text,
+        fontSize: "13px",
+        padding: "8px 10px",
+        borderRadius: "6px",
+        cursor: "pointer",
+        textAlign: "left",
+        fontFamily: "inherit",
+      },
+      paletteRowActive: {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        width: "100%",
+        border: "1px solid transparent",
+        background: C.surfaceHover,
+        color: C.text,
+        fontSize: "13px",
+        padding: "8px 10px",
+        borderRadius: "6px",
+        cursor: "pointer",
+        textAlign: "left",
+        fontFamily: "inherit",
+      },
+      paletteName: { flexShrink: 0, fontWeight: "600" },
+      paletteMeta: {
+        flex: 1,
+        minWidth: 0,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        color: C.textDim,
+        fontSize: "11px",
+      },
+      paletteHint: { color: C.textDim, fontSize: "11px", padding: "6px 14px", borderTop: "1px solid " + C.borderSubtle },
       icon: {
         border: "1px solid transparent",
         background: "transparent",
@@ -302,6 +484,19 @@ window.__ModuleLoader__.load({
         background: C.surface,
         color: C.text,
         fontFamily: "inherit",
+      },
+      select: {
+        width: "100%",
+        boxSizing: "border-box",
+        padding: "5px 8px",
+        fontSize: "12px",
+        borderRadius: "5px",
+        border: "1px solid " + C.border,
+        outline: "none",
+        background: C.surface,
+        color: C.text,
+        fontFamily: "inherit",
+        cursor: "pointer",
       },
       textarea: {
         width: "100%",
@@ -593,6 +788,24 @@ window.__ModuleLoader__.load({
     // 而插入必须在本地一次成型——不能先问 host 再插，否则中间用户可能改了草稿。
     const VAR_NAME_RE = /^[\p{L}\p{N}_-]{1,40}$/u;
 
+    // 动态宏变量：插入时用本地时间实时替换，不弹表单、不进 variables 元数据。
+    // 与 index.js 的 DYNAMIC_VAR_NAMES 保持一致。
+    const DYNAMIC_VAR_NAMES = new Set(["date", "time", "datetime"]);
+
+    const isDynamic = (name) => DYNAMIC_VAR_NAMES.has(name);
+
+    /** 计算动态变量的即时值；非动态变量返回 null。 */
+    function dynamicValue(name) {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, "0");
+      if (name === "date") return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+      if (name === "time") return `${p(d.getHours())}:${p(d.getMinutes())}`;
+      if (name === "datetime") {
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+      }
+      return null;
+    }
+
     function parseVarAt(content, at) {
       if (content.slice(at, at + 2) !== "{{") return null;
       const close = content.indexOf("}}", at + 2);
@@ -669,6 +882,12 @@ window.__ModuleLoader__.load({
           text += tk.text;
           continue;
         }
+        // 动态宏变量（{{date}}/{{time}}/{{datetime}}）直接替换，不参与校验
+        const dyn = isDynamic(tk.name) ? dynamicValue(tk.name) : null;
+        if (dyn !== null) {
+          text += dyn;
+          continue;
+        }
         const def = (variables && variables[tk.name]) || {};
         const raw = values && typeof values[tk.name] === "string" ? values[tk.name] : "";
         const effective = raw.trim() !== "" ? raw : typeof def.default === "string" ? def.default : "";
@@ -680,22 +899,24 @@ window.__ModuleLoader__.load({
 
     /**
      * 点击片段时该走哪条路（ROADMAP §2.5 表单触发规则表）：
-     *   direct   —— 没有变量，直接插入
+     *   direct   —— 没有变量（或只有动态宏变量），直接插入
      *   defaults —— 变量全都非必填且都有默认值，按默认值直接插入
      *   form     —— 有必填变量，或缺默认值 / 没有 variables 元数据（旧数据），弹表单
+     * 动态宏变量（{{date}}/{{time}}/{{datetime}}）不算变量：不触发表单、不参与必填判断。
      */
     function fillPlan(snippet) {
       const { names } = scanPlaceholders(snippet.content || "");
-      if (names.length === 0) return { kind: "direct" };
+      const userVars = names.filter((n) => !isDynamic(n));
+      if (userVars.length === 0) return { kind: "direct" };
       const vars = snippet.variables || {};
-      const allDefaulted = names.every((n) => {
+      const allDefaulted = userVars.every((n) => {
         const d = vars[n];
         return !!d && d.required !== true && typeof d.default === "string" && d.default.trim() !== "";
       });
       return allDefaulted ? { kind: "defaults" } : { kind: "form" };
     }
 
-    /** 正文里出现的变量名（首次出现顺序），供变量编辑器与表单共用。 */
+    /** 正文里出现的变量名（首次出现顺序，含动态宏变量），供变量编辑器与表单共用。 */
     function varNamesOf(content) {
       return scanPlaceholders(content || "").names;
     }
@@ -715,6 +936,15 @@ window.__ModuleLoader__.load({
       const s = String(text || "");
       if (typeof TextEncoder === "function") return new TextEncoder().encode(s).length;
       return s.length;
+    }
+
+    /** 时间戳（秒或毫秒）→ 本地时间字符串；坏值回退「-」。 */
+    function fmtTime(t) {
+      if (!Number.isFinite(t)) return "-";
+      const d = new Date(t < 1e12 ? t * 1000 : t);
+      if (Number.isNaN(d.getTime())) return "-";
+      const p = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
     }
 
     /** 与 host 侧 MAX_CONTENT 一致：编辑后实时重算是否超长，不能只信 host 首次返回的 truncated。 */
@@ -747,8 +977,18 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState(null); // 短暂提示（默认值填充等），关面板后仍可见
       const [editing, setEditing] = useState(null); // 行内编辑草稿
       const [filling, setFilling] = useState(null); // 占位符表单 { snippet, values }
+      const [view, setView] = useState("all"); // v1.3 视图切换：all / pinned / recent
+      const [history, setHistory] = useState(null); // v1.3 版本历史面板 { id, list, busy }
+      // v1.3 命令面板：全局快捷唤起（Ctrl+Shift+K / Ctrl+Shift+P），独立于 dock 面板
+      const [paletteOpen, setPaletteOpen] = useState(false);
+      const [paletteQuery, setPaletteQuery] = useState("");
+      const [paletteSelected, setPaletteSelected] = useState(-1);
+      const paletteInputRef = useRef(null);
       const searchRef = useRef(null);
       const nameRef = useRef(null);
+      // 面板 DOM 引用：拖拽/缩放期间直接改 style.left/top/width/height，
+      // 不触发 React 全量 re-render（那是拖拽卡顿的根因），松手才 commit 进 state。
+      const panelRef = useRef(null);
       // toggle 里要读当前 review/busy，但又不能把 review 放进它的依赖（每次渲染都会重建），
       // 用一个跟随渲染更新的 ref 取快照。
       const reviewRef = useRef(null);
@@ -775,6 +1015,70 @@ window.__ModuleLoader__.load({
         load();
       }, []);
 
+      // ── v1.3 命令面板：全局快捷唤起 Ctrl+Shift+K / Ctrl+Shift+P ──
+      // 打开时把 dock 面板关掉，避免两个入口打架；focus 交给 palette input。
+      useEffect(() => {
+        if (!paletteOpen) return;
+        const onKey = (e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            setPaletteOpen(false);
+          }
+        };
+        document.addEventListener("keydown", onKey, true);
+        setTimeout(() => {
+          if (paletteInputRef.current) paletteInputRef.current.focus();
+        }, 0);
+        return () => document.removeEventListener("keydown", onKey, true);
+      }, [paletteOpen]);
+
+      useEffect(() => {
+        const onKey = (e) => {
+          if (e.key === "k" && e.ctrlKey && e.shiftKey) {
+            e.preventDefault();
+            setPaletteOpen(true);
+            setOpen(false);
+          } else if (e.key === "p" && e.ctrlKey && e.shiftKey) {
+            e.preventDefault();
+            setPaletteOpen(true);
+            setOpen(false);
+          }
+        };
+        document.addEventListener("keydown", onKey);
+        return () => document.removeEventListener("keydown", onKey);
+      }, []);
+
+      // 命令面板结果：按名称/分类/标签搜索；清空时列出全部（有收藏的置顶）。
+      const paletteResults = useMemo(() => {
+        const q = paletteQuery.trim().toLowerCase();
+        const pool = q ? filterSnippets(snippets, paletteQuery) : snippets;
+        const sorted = pool.slice().sort((a, b) => {
+          const pa = a.pinned === true ? 1 : 0;
+          const pb = b.pinned === true ? 1 : 0;
+          if (pa !== pb) return pb - pa;
+          return (b.lastUsedAt || b.updatedAt || 0) - (a.lastUsedAt || a.updatedAt || 0);
+        });
+        return sorted.slice(0, 30);
+      }, [snippets, paletteQuery]);
+
+      const openPalette = () => {
+        setPaletteQuery("");
+        setPaletteSelected(-1);
+        setPaletteOpen(true);
+        setOpen(false);
+      };
+
+      const closePalette = () => {
+        setPaletteOpen(false);
+        setPaletteQuery("");
+        setPaletteSelected(-1);
+      };
+
+      const paletteChoose = (snippet) => {
+        closePalette();
+        insert(snippet);
+      };
+
       // §3.1：启动时问一次模型可用性。拿不到就不降级为「假装可用」——
       // 保持预置的可用状态，让点击时的错误提示兜底（老 host 没有这个字段）。
       useEffect(() => {
@@ -795,11 +1099,20 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer);
       }, [notice]);
 
-      // 拖拽：依赖 drag 起始快照，mousemove 用快照计算，结束保存
+      // 拖拽：依赖 drag 起始快照，mousemove 用快照计算，结束保存。
+      // 性能：移动期间直接改 DOM（不 setState），松手才 setPanelPos commit，
+      // 避免每个 mousemove 都触发整个 dock 组件 re-render 造成卡顿。
       useEffect(() => {
         if (!drag) return;
+        const el = panelRef.current;
         const onMove = (e) => {
-          setPanelPos(clampPos(drag.left + (e.clientX - drag.startX), drag.top + (e.clientY - drag.startY), panelSize));
+          const pos = clampPos(drag.left + (e.clientX - drag.startX), drag.top + (e.clientY - drag.startY), panelSize);
+          if (el) {
+            el.style.left = pos.left + "px";
+            el.style.top = pos.top + "px";
+          } else {
+            setPanelPos(pos);
+          }
         };
         const onUp = (e) => {
           const pos = clampPos(drag.left + (e.clientX - drag.startX), drag.top + (e.clientY - drag.startY), panelSize);
@@ -818,6 +1131,7 @@ window.__ModuleLoader__.load({
       // 尺寸拖拽：八个方向把手按住拉，实时改面板宽高/位置，松手保存
       useEffect(() => {
         if (!resizing) return;
+        const el = panelRef.current;
         const apply = (e) => {
           const dx = e.clientX - resizing.startX;
           const dy = e.clientY - resizing.startY;
@@ -836,15 +1150,27 @@ window.__ModuleLoader__.load({
           if (dir.includes("w")) nl = left + (resizing.w - size.w);
           if (dir.includes("n")) nt = top + (resizing.h - size.h);
           const pos = clampPos(nl, nt, size);
-          setPanelSize(size);
-          setPanelPos(pos);
           return { size, pos };
         };
-        const onMove = (e) => { apply(e); };
+        const onMove = (e) => {
+          const { size, pos } = apply(e);
+          if (el) {
+            el.style.left = pos.left + "px";
+            el.style.top = pos.top + "px";
+            el.style.width = size.w + "px";
+            el.style.height = size.h + "px";
+            el.style.maxHeight = "none";
+          } else {
+            setPanelSize(size);
+            setPanelPos(pos);
+          }
+        };
         const onUp = (e) => {
           const { size, pos } = apply(e);
           saveSize(size);
           savePos(pos);
+          setPanelSize(size);
+          setPanelPos(pos);
           setResizing(null);
         };
         document.addEventListener("mousemove", onMove);
@@ -1026,12 +1352,15 @@ window.__ModuleLoader__.load({
       const beginEdit = (snippet) => {
         if (editing && editing.dirty) return; // 不偷偷丢别人的草稿
         setFilling(null);
+        setHistory(null);
         setEditing({
           id: snippet.id,
           name: snippet.name,
           category: snippet.category || "",
           content: snippet.content,
           variables: { ...(snippet.variables || {}) },
+          tags: Array.isArray(snippet.tags) ? snippet.tags.slice() : [],
+          pinned: snippet.pinned === true,
           originalRevision: Number.isInteger(snippet.revision) ? snippet.revision : null,
           dirty: false,
           busy: false,
@@ -1047,12 +1376,15 @@ window.__ModuleLoader__.load({
       const beginCreate = () => {
         if (editing && editing.dirty) return;
         setFilling(null);
+        setHistory(null);
         setEditing({
           id: null,
           name: "",
           category: "",
           content: "",
           variables: {},
+          tags: [],
+          pinned: false,
           originalRevision: null,
           dirty: false,
           busy: false,
@@ -1078,6 +1410,7 @@ window.__ModuleLoader__.load({
           if (next.label === "") delete next.label;
           if (next.default === "" && next.required !== true) delete next.default;
           if (next.required !== true) delete next.required;
+          if (!Array.isArray(next.options) || next.options.length === 0) delete next.options;
           return { ...prev, variables: { ...prev.variables, [name]: next }, dirty: true, confirmCancel: false };
         });
       };
@@ -1106,6 +1439,8 @@ window.__ModuleLoader__.load({
           content: cur.content,
           category: cur.category.trim() ? cur.category.trim() : null,
           variables: cur.variables,
+          tags: cur.tags,
+          pinned: cur.pinned === true,
         };
         if (cur.id) payload.id = cur.id;
         if (force) {
@@ -1148,6 +1483,8 @@ window.__ModuleLoader__.load({
                 category: s.category || "",
                 content: s.content,
                 variables: { ...(s.variables || {}) },
+                tags: Array.isArray(s.tags) ? s.tags.slice() : [],
+                pinned: s.pinned === true,
                 originalRevision: Number.isInteger(s.revision) ? s.revision : null,
                 dirty: false,
                 busy: false,
@@ -1336,7 +1673,8 @@ window.__ModuleLoader__.load({
         setError(null);
         setExportPath(null);
         // write 让 host 侧落盘并回传绝对路径；文件名留空则用 host 的默认名。
-        Promise.resolve(rpc.call(CHANNEL, "export", { write: "" }))
+        // reveal:true 让 host 用系统文件管理器直接打开/选中这个文件，免去手动找目录。
+        Promise.resolve(rpc.call(CHANNEL, "export", { write: "", reveal: true }))
           .then((result) => {
             setExporting(false);
             if (result && result.ok) {
@@ -1352,6 +1690,12 @@ window.__ModuleLoader__.load({
             setExporting(false);
             setError(String((err && err.message) || err));
           });
+      };
+
+      /** 在系统文件管理器中打开导出文件（复用 host 的 reveal 能力）。 */
+      const revealExport = (path) => {
+        if (!path) return;
+        Promise.resolve(rpc.call(CHANNEL, "export", { revealPath: path })).catch(() => {});
       };
 
       const doImport = () => {
@@ -1442,19 +1786,30 @@ window.__ModuleLoader__.load({
           .catch((err) => setError(String((err && err.message) || err)));
       };
 
-      const visible = useMemo(() => filterSnippets(snippets, query), [snippets, query]);
-      // §3.2 键盘导航：selected 是 visible 数组下标；query/snippets 一变就复位到 -1，
+      // v1.3 视图过滤：先按 query 搜索，再按 view 收窄（all/pinned/recent）。
+      const base = useMemo(() => filterSnippets(snippets, query), [snippets, query]);
+      const visible = useMemo(() => {
+        if (view === "pinned") return base.filter((s) => s.pinned === true);
+        if (view === "recent") {
+          const ts = (s) =>
+            Number.isFinite(s.lastUsedAt) ? s.lastUsedAt : Number.isFinite(s.updatedAt) ? s.updatedAt : 0;
+          return base.slice().sort((a, b) => ts(b) - ts(a)).slice(0, 20);
+        }
+        return base;
+      }, [base, view]);
+      // §3.2 键盘导航：selected 是 visible 数组下标；query/snippets/view 一变就复位到 -1，
       // 避免旧的选中下标指向不同条目。
       useEffect(() => {
         setSelected(-1);
-      }, [query, snippets]);
+      }, [query, snippets, view]);
       const selectedSnippet = selected >= 0 && selected < visible.length ? visible[selected] : null;
       const trimmedQuery = query.trim();
 
       // ────────── 渲染：编辑器 ──────────
       const renderEditor = () => {
         const e = editing;
-        const names = varNamesOf(e.content);
+        // 动态宏变量（date/time/datetime）由插入时自动替换，不提供元数据编辑
+        const names = varNamesOf(e.content).filter((n) => !isDynamic(n));
         return h(
           "div",
           { style: style.editor },
@@ -1505,6 +1860,35 @@ window.__ModuleLoader__.load({
           h(
             "label",
             { style: style.field },
+            h("span", { style: style.label }, "标签（逗号分隔）"),
+            h("input", {
+              type: "text",
+              className: "ps-input",
+              style: style.input,
+              value: (e.tags || []).join("、"),
+              placeholder: "如：代码、常用、审查",
+              onChange: (ev) => {
+                const tags = ev.target.value
+                  .split(/[,，、]/)
+                  .map((t) => t.trim())
+                  .filter(Boolean);
+                patchDraft({ tags });
+              },
+            })
+          ),
+          h(
+            "label",
+            { style: { ...style.checkWrap, padding: "4px 0" } },
+            h("input", {
+              type: "checkbox",
+              checked: e.pinned === true,
+              onChange: (ev) => patchDraft({ pinned: ev.target.checked }),
+            }),
+            "收藏置顶"
+          ),
+          h(
+            "label",
+            { style: style.field },
             h("span", { style: style.label }, "正文（用 {{变量名}} 标记占位符，\\{{ 输出字面量）"),
             h("textarea", {
               className: "ps-textarea",
@@ -1541,6 +1925,21 @@ window.__ModuleLoader__.load({
                       value: typeof d.default === "string" ? d.default : "",
                       placeholder: "默认值（可空）",
                       onChange: (ev) => setVar(nm, { default: ev.target.value }),
+                    }),
+                    h("input", {
+                      type: "text",
+                      className: "ps-input",
+                      style: { ...style.input, flex: "1 1 90px", width: "auto" },
+                      value: Array.isArray(d.options) ? d.options.join("、") : "",
+                      placeholder: "选项（逗号/顿号分隔，可空）",
+                      title: "填了选项后，插入时会变成下拉框，用户只能从这些选项里选",
+                      onChange: (ev) => {
+                        const options = ev.target.value
+                          .split(/[,，、]/)
+                          .map((t) => t.trim())
+                          .filter(Boolean);
+                        setVar(nm, options.length > 0 ? { options } : { options: undefined });
+                      },
                     })
                   );
                 })
@@ -1573,7 +1972,8 @@ window.__ModuleLoader__.load({
       // ────────── 渲染：占位符表单 ──────────
       const renderFillForm = () => {
         const cur = filling;
-        const names = varNamesOf(cur.snippet.content);
+        // 动态宏变量（date/time/datetime）不弹输入框，插入时自动替换，只列用户变量
+        const names = varNamesOf(cur.snippet.content).filter((n) => !isDynamic(n));
         const vars = cur.snippet.variables || {};
         const { tokens } = scanPlaceholders(cur.snippet.content);
         const { missing } = renderContent(tokens, vars, cur.values);
@@ -1585,18 +1985,34 @@ window.__ModuleLoader__.load({
           names.map((nm) => {
             const d = vars[nm] || {};
             const required = d.required === true;
+            const opts = Array.isArray(d.options) ? d.options : [];
+            const label = (typeof d.label === "string" && d.label ? d.label : nm) + (required ? " · 必填" : "");
+            const val = typeof cur.values[nm] === "string" ? cur.values[nm] : "";
             return h(
               "label",
               { key: nm, style: style.field },
-              h("span", { style: style.label }, (typeof d.label === "string" && d.label ? d.label : nm) + (required ? " · 必填" : "")),
-              h("input", {
-                type: "text",
-                className: "ps-input",
-                style: style.input,
-                value: typeof cur.values[nm] === "string" ? cur.values[nm] : "",
-                placeholder: typeof d.default === "string" ? d.default : "",
-                onChange: (ev) => setFillValue(nm, ev.target.value),
-              })
+              h("span", { style: style.label }, label),
+              opts.length > 0
+                ? h(
+                    "select",
+                    {
+                      className: "ps-select",
+                      style: style.select,
+                      value: val,
+                      onChange: (ev) => setFillValue(nm, ev.target.value),
+                    },
+                    // 非必填给一个空选项，让用户能「不填」（走变量名留空语义）
+                    !required ? h("option", { value: "" }, "（不填）") : null,
+                    opts.map((o) => h("option", { key: o, value: o }, o))
+                  )
+                : h("input", {
+                    type: "text",
+                    className: "ps-input",
+                    style: style.input,
+                    value: val,
+                    placeholder: typeof d.default === "string" ? d.default : "",
+                    onChange: (ev) => setFillValue(nm, ev.target.value),
+                  })
             );
           }),
           h(
@@ -1813,7 +2229,9 @@ window.__ModuleLoader__.load({
                 onMouseEnter: () => setSelected(idx),
                 title: "点击插入\n\n" + s.content,
               },
-              highlightText(s.name, trimmedQuery)
+              ...(s.pinned === true ? [h("span", { style: style.pinStar }, "★ ")] : []),
+              highlightText(s.name, trimmedQuery),
+              ...((s.tags || []).map((t) => h("span", { key: t, style: style.tagChip }, t)))
             ),
             h(
               "button",
@@ -1827,6 +2245,18 @@ window.__ModuleLoader__.load({
                 "aria-label": `编辑「${s.name}」`,
               },
               "✏️"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "ps-icon",
+                style: { ...style.icon, ...style.iconBusy },
+                onClick: () => showHistory(s),
+                title: "查看历史版本",
+                "aria-label": `历史「${s.name}」`,
+              },
+              "🕘"
             ),
             h(
               "button",
@@ -1868,10 +2298,137 @@ window.__ModuleLoader__.load({
         h(
           "div",
           { key: category || "__none__" },
-          category ? h("div", { style: style.group }, category) : null,
+          category
+            ? h(
+                "div",
+                { style: style.group },
+                category,
+                view === "pinned" ? h("span", { style: style.groupStar }, " ★") : null
+              )
+            : null,
           list.map((s) => rowOf(s, visible.indexOf(s)))
         )
       );
+
+      const showHistory = (snippet) => {
+        if (history && history.id === snippet.id) {
+          setHistory(null);
+          return;
+        }
+        setHistory({ id: snippet.id, name: snippet.name, list: [], busy: true });
+        Promise.resolve(rpc.call(CHANNEL, "history", { id: snippet.id }))
+          .then((result) => {
+            const list = result && result.ok && result.value ? result.value.history || [] : [];
+            setHistory((prev) => (prev && prev.id === snippet.id ? { ...prev, list, busy: false } : prev));
+          })
+          .catch(() => {
+            setHistory((prev) => (prev && prev.id === snippet.id ? { ...prev, list: [], busy: false } : prev));
+          });
+      };
+
+      const renderPalette = () => {
+        if (!paletteOpen) return null;
+        return h(
+          "div",
+          { style: style.paletteOverlay, onMouseDown: (e) => { if (e.target === e.currentTarget) closePalette(); } },
+          h(
+            "div",
+            { style: style.paletteBox },
+            h("input", {
+              ref: paletteInputRef,
+              type: "text",
+              className: "ps-search",
+              style: style.paletteInput,
+              placeholder: "搜索片段（名称 / 分类 / 标签 / 内容）…",
+              value: paletteQuery,
+              onChange: (e) => {
+                setPaletteQuery(e.target.value);
+                setPaletteSelected(-1);
+              },
+              onKeyDown: (e) => {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  if (paletteResults.length === 0) return;
+                  setPaletteSelected((prev) => (prev + 1) % paletteResults.length);
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  if (paletteResults.length === 0) return;
+                  setPaletteSelected((prev) => (prev <= 0 ? paletteResults.length - 1 : prev - 1));
+                } else if (e.key === "Enter") {
+                  e.preventDefault();
+                  const pick = paletteSelected >= 0 ? paletteResults[paletteSelected] : paletteResults[0];
+                  if (pick) paletteChoose(pick);
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  closePalette();
+                }
+              },
+            }),
+            h(
+              "div",
+              { style: style.paletteList },
+              paletteResults.length === 0
+                ? h("div", { style: style.empty }, snippets.length === 0 ? "还没有片段，点 dock 的「＋ 新建」保存一个。" : `没有匹配「${paletteQuery}」的片段。`)
+                : paletteResults.map((s, i) =>
+                    h(
+                      "button",
+                      {
+                        key: s.id,
+                        type: "button",
+                        className: "ps-item",
+                        style: i === paletteSelected ? style.paletteRowActive : style.paletteRow,
+                        onMouseEnter: () => setPaletteSelected(i),
+                        onClick: () => paletteChoose(s),
+                      },
+                      s.pinned === true ? h("span", { style: style.pinStar }, "★ ") : null,
+                      h("span", { style: style.paletteName }, highlightText(s.name, paletteQuery.trim())),
+                      h(
+                        "span",
+                        { style: style.paletteMeta },
+                        [s.category, (s.tags || []).join(" · ")].filter(Boolean).join(" · ") || "（无分类）"
+                      )
+                    )
+                  )
+            ),
+            h(
+              "div",
+              { style: style.paletteHint },
+              "↑↓ 选择 · Enter 插入 · Esc 关闭 · Ctrl+Shift+K 唤起"
+            )
+          )
+        );
+      };
+
+      const renderHistory = () => {
+        const hh = history;
+        if (!hh) return null;
+        return h(
+          "div",
+          { style: style.historyWrap },
+          h(
+            "div",
+            { style: style.historyBox },
+            h("div", { style: style.label }, `历史版本 ·「${hh.name}」`),
+            hh.busy
+              ? h("div", { style: style.hintInline }, "加载中…")
+              : hh.list.length === 0
+              ? h("div", { style: style.hintInline }, "暂无历史版本（每次保存前的内容会留档，最多 20 版）")
+              : hh.list.map((v, i) =>
+                  h(
+                    "div",
+                    { key: i, style: style.historyRow },
+                    h("span", { style: style.historyMeta }, `#${v.revision ?? i + 1}`),
+                    h(
+                      "div",
+                      { style: style.historyContent },
+                      h("div", { style: { color: C.textDim, fontSize: "10px" } }, `保存于 ${fmtTime(v.at)} · 插入旧版`),
+                      v.content
+                    )
+                  )
+                )
+          )
+        );
+      };
 
       const bodyContent = error
         ? h("div", { style: style.error }, "⚠ " + error)
@@ -1921,12 +2478,14 @@ window.__ModuleLoader__.load({
           "📋 片段库"
         ),
         notice ? h("span", { className: "ps-notice", style: style.notice }, notice) : null,
+        renderPalette(),
         open &&
           h(
             "div",
             {
               id: "ps-panel",
               className: "ps-panel",
+              ref: panelRef,
               role: "dialog",
               "aria-label": "片段库",
               style: {
@@ -2023,6 +2582,43 @@ window.__ModuleLoader__.load({
             ),
             review ? renderReview() : null,
             filling ? h("div", { style: style.formWrap }, renderFillForm()) : null,
+            h(
+              "div",
+              { style: style.viewBar },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "ps-view",
+                  style: view === "all" ? style.viewBtnActive : style.viewBtn,
+                  onClick: () => setView("all"),
+                },
+                "全部"
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "ps-view",
+                  style: view === "pinned" ? style.viewBtnActive : style.viewBtn,
+                  onClick: () => setView("pinned"),
+                  title: "只看收藏置顶的片段",
+                },
+                "★ 收藏"
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "ps-view",
+                  style: view === "recent" ? style.viewBtnActive : style.viewBtn,
+                  onClick: () => setView("recent"),
+                  title: "按最近使用排序（最多 20 条）",
+                },
+                "最近使用"
+              )
+            ),
+            history ? renderHistory() : null,
             h("div", { className: "ps-body", style: style.body }, bodyContent),
             editing && editing.id === null
               ? h("div", { style: style.formWrap }, renderEditor())
@@ -2128,7 +2724,18 @@ window.__ModuleLoader__.load({
               ? h(
                   "div",
                   { style: style.exportBar },
-                  h("span", { style: style.exportText, title: exportPath }, "📄 " + exportPath)
+                  h("span", { style: style.exportText, title: exportPath }, "📄 " + exportPath),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "ps-ghost",
+                      style: { ...style.btnGhost, padding: "1px 8px", fontSize: "11px" },
+                      onClick: () => revealExport(exportPath),
+                      title: "在系统文件管理器中打开这个文件",
+                    },
+                    "打开"
+                  )
                 )
               : null,
             deleted.length > 0

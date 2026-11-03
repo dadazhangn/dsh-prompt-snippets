@@ -68,7 +68,7 @@ setGroup("1. 能力握手");
   const r = await call("capabilities", {});
   check("capabilities 返回 ok", r.ok === true);
   check("列出全部端点", Array.isArray(r.value?.endpoints) && r.value.endpoints.includes("restore"), r.value?.endpoints?.join(","));
-  check("storeVersion = 3", r.value?.storeVersion === 3, String(r.value?.storeVersion));
+  check("storeVersion = 4", r.value?.storeVersion === 4, String(r.value?.storeVersion));
   check("channel 正确", r.value?.channel === "/prompt-snippets", r.value?.channel);
 }
 
@@ -79,7 +79,13 @@ setGroup("2. 迁移矩阵");
 await reset(null);
 {
   const r = await call("list", {});
-  check("无文件 → 空库成功", r.ok === true && r.value.snippets.length === 0);
+  check("无文件 → 首次预置模板包", r.ok === true && r.value.snippets.length === 8, String(r.value.snippets.length));
+  check("模板包含代码审查", r.value.snippets.some((s) => s.name === "代码审查"));
+  check("模板包含 Git 提交信息", r.value.snippets.some((s) => s.name === "Git 提交信息"));
+  check("模板包含动态变量", r.value.snippets.some((s) => /\{\{date\}\}/.test(s.content) || /\{\{time\}\}/.test(s.content)));
+  // 模板已落盘：再次读取（文件已存在）不应再注入第二份
+  const r2 = await call("list", {});
+  check("再次读取不重复注入", r2.value.snippets.length === 8, String(r2.value.snippets.length));
 }
 
 // 2.2 v1 真实生产形态（无 id / 无 deletedAt / 无 revision）
@@ -105,14 +111,14 @@ await reset({
   check("lastUsedAt 补 null", a?.lastUsedAt === null);
   check("variables 补空对象", JSON.stringify(a?.variables) === "{}", JSON.stringify(a?.variables));
   const disk = await read();
-  check("磁盘升到 version 3", disk.version === 3, String(disk.version));
+  check("磁盘升到 version 4", disk.version === 4, String(disk.version));
   // 迁移前的现场必须是**原始 v1 字节**，不是迁移后的结果
-  const preName = (await readdir(DIR)).find((f) => f === "snippets.json.pre-v3.bak");
-  check("迁移前留了 pre-v3 备份", !!preName, preName || "(无)");
+  const preName = (await readdir(DIR)).find((f) => f === "snippets.json.pre-v4.bak");
+  check("迁移前留了 pre-v4 备份", !!preName, preName || "(无)");
   if (preName) {
     const pre = JSON.parse(await readFile(join(DIR, preName), "utf8"));
-    check("pre-v3 备份是原始 v1 内容", pre.version === 1 && pre.snippets.length === 2, `v${pre.version}/${pre.snippets?.length}`);
-    check("pre-v3 备份保留原始字段（无 revision）", pre.snippets.every((s) => s.revision === undefined));
+    check("pre-v4 备份是原始 v1 内容", pre.version === 1 && pre.snippets.length === 2, `v${pre.version}/${pre.snippets?.length}`);
+    check("pre-v4 备份保留原始字段（无 revision）", pre.snippets.every((s) => s.revision === undefined));
   }
 }
 
@@ -161,7 +167,7 @@ await reset({
 
 // 2.6 revision 是 0 / 负数
 await reset({
-  version: 3,
+  version: 4,
   snippets: [
     { id: "r0", name: "零", content: "c", revision: 0 },
     { id: "rn", name: "负", content: "c", revision: -5 },
@@ -177,7 +183,7 @@ await reset({
 
 // 2.7 variables 有正文中不存在的键
 await reset({
-  version: 3,
+  version: 4,
   snippets: [{ id: "v1", name: "变量", content: "{{真实}}", variables: { 真实: { required: true }, 幽灵: {} } }],
 });
 {
@@ -220,7 +226,7 @@ await reset({
 
 // 2.10 迁移前备份的边界：已有备份不覆盖 / 无需迁移就不产生备份
 {
-  const hasBak = async () => (await readdir(DIR)).includes("snippets.json.pre-v3.bak");
+  const hasBak = async () => (await readdir(DIR)).includes("snippets.json.pre-v4.bak");
 
   // a) 已是**完整**的 v3（含全部字段）：不该凭空造备份
   //    注意：手写的最小 v3 记录缺 revision/variables 等，会被当成待修复 → 合法地产生备份，
@@ -228,22 +234,22 @@ await reset({
   await reset(null);
   await call("save", { name: "基线", content: "hello" });
   const canonical = await read();
-  check("基线是完整的 v3 记录", canonical.version === 3 && canonical.snippets[0].revision === 1, JSON.stringify(Object.keys(canonical.snippets[0])));
+  check("基线是完整的 v4 记录", canonical.version === 4 && canonical.snippets[0].revision === 1, JSON.stringify(Object.keys(canonical.snippets[0])));
   await reset(canonical);
   await call("list", {});
-  check("无需迁移时不产生 pre-v3 备份", !(await hasBak()));
+  check("无需迁移时不产生 pre-v4 备份", !(await hasBak()));
 
   // b) 已有备份 + 再次从旧版本迁移：原备份字节必须一字不动
   await reset({ version: 2, snippets: [{ id: "y", name: "二次", content: "c2" }] });
-  await writeFile(join(DIR, "snippets.json.pre-v3.bak"), "SENTINEL", "utf8");
+  await writeFile(join(DIR, "snippets.json.pre-v4.bak"), "SENTINEL", "utf8");
   await call("list", {});
-  const kept = await readFile(join(DIR, "snippets.json.pre-v3.bak"), "utf8");
-  check("已有 pre-v3 备份不被覆盖", kept === "SENTINEL", kept.slice(0, 20));
+  const kept = await readFile(join(DIR, "snippets.json.pre-v4.bak"), "utf8");
+  check("已有 pre-v4 备份不被覆盖", kept === "SENTINEL", kept.slice(0, 20));
 
   // c) 无文件（ENOENT 空库）：raw 是 undefined，不该造备份
   await reset(null);
   await call("list", {});
-  check("空库首次读取不产生 pre-v3 备份", !(await hasBak()));
+  check("空库首次读取不产生 pre-v4 备份", !(await hasBak()));
 }
 
 // ══════════════ 3. 存储可靠性 ══════════════
@@ -265,7 +271,7 @@ await reset("{ 这不是 JSON ");
 }
 
 // 3.2 结构非法（snippets 不是数组）
-await reset(JSON.stringify({ version: 3, snippets: "不是数组" }));
+await reset(JSON.stringify({ version: 4, snippets: "不是数组" }));
 {
   const r = await call("list", {});
   const files = await readdir(DIR);
@@ -274,7 +280,7 @@ await reset(JSON.stringify({ version: 3, snippets: "不是数组" }));
 }
 
 // 3.3 .bak 轮换：第二次写入后 .bak = 第一次的内容
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await call("save", { name: "第一", content: "c1" });
   const first = await readFile(FILE, "utf8");
@@ -307,7 +313,7 @@ await reset(null);
 }
 
 // 3.6 并发 50 条不丢
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await Promise.all(
     Array.from({ length: 50 }, (_, i) => call("save", { name: `并发${i}`, content: `内容${i}` }))
@@ -320,7 +326,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 4. 双轨匹配 ══════════════
 setGroup("4. 双轨匹配");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   const s1 = (await call("save", { name: "唯一", content: "c" })).value.snippet;
   check("按名称删除唯一命中", (await call("delete", { ref: "唯一" })).ok === true);
@@ -348,14 +354,14 @@ await reset({ version: 3, snippets: [] });
   check("按 #前缀可精确删除重名之一", byPrefix.ok === true, byPrefix.error?.message);
 
   // 名称唯一性冲突
-  await reset({ version: 3, snippets: [] });
+  await reset({ version: 4, snippets: [] });
   await call("save", { name: "占位名", content: "a" });
   const other = (await call("save", { name: "另一个", content: "b" })).value.snippet;
   const collide = await call("save", { id: other.id, name: "占位名", content: "c" });
   check("改名撞名报 conflict", collide.ok === false && collide.error.code === "conflict", collide.error?.code);
 
   // 已删除片段的名字可被复用
-  await reset({ version: 3, snippets: [] });
+  await reset({ version: 4, snippets: [] });
   const d1 = (await call("save", { name: "可复用", content: "v1" })).value.snippet;
   await call("delete", { id: d1.id });
   const d2 = await call("save", { name: "可复用", content: "v2" });
@@ -369,7 +375,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 5. revision 乐观锁 ══════════════
 setGroup("5. revision 乐观锁");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   const s = (await call("save", { name: "锁", content: "v1" })).value.snippet;
   check("新建 revision=1", s.revision === 1, String(s.revision));
@@ -387,7 +393,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 6. 占位符 ══════════════
 setGroup("6. 占位符");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   const cases = [
     ["{{标题}}", ["标题"], "基本变量"],
@@ -420,7 +426,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 7. optimize ══════════════
 setGroup("7. optimize");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   fakeLlm.mode = "none";
   const noLlm = await call("optimize", { content: "原提示词" });
@@ -457,7 +463,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 8. --cat 收口 ══════════════
 setGroup("8. --cat 收口");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   const t1 = await cmd("add 报表 生成本周周报 --cat=写作");
   check("行尾 --cat= 被识别", t1.kind === "success" && t1.text.includes("写作"), t1.text);
@@ -495,7 +501,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 9. 命令族 ══════════════
 setGroup("9. 命令族");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   const l0 = await cmd("");
   check("空参数 → 引导语", l0.kind === "success" && l0.text.includes("还没有"), l0.text);
@@ -537,7 +543,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 10. 导入导出 ══════════════
 setGroup("10. 导入导出");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await call("save", { name: "导出甲", category: "类A", content: "内容{{v}}" });
   await call("save", { name: "导出乙", content: "纯文本" });
@@ -557,7 +563,7 @@ await reset({ version: 3, snippets: [] });
   check("按 ids 导出只含 1 条", ex1.value.count === 1, String(ex1.value.count));
 
   // dryRun 导入
-  await reset({ version: 3, snippets: [] });
+  await reset({ version: 4, snippets: [] });
   const dry = await call("import", { json: ex.value.json, mode: "merge", dryRun: true });
   check("dryRun 返回 plan", dry.ok === true && dry.value.plan.added === 2, JSON.stringify(dry.value?.plan));
   const afterDry = (await call("list", {})).value.snippets;
@@ -588,7 +594,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 11. touch 批量 ══════════════
 setGroup("11. touch 批量");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   const s = (await call("save", { name: "计数", content: "c" })).value.snippet;
   const t1 = await call("touch", { ids: [s.id] });
@@ -609,7 +615,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 12. 参数校验 ══════════════
 setGroup("12. 参数校验");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   check("空名称被拒", (await call("save", { name: "", content: "x" })).error?.code === "bad-request");
   check("超长名称被拒", (await call("save", { name: "x".repeat(200), content: "x" })).error?.code === "bad-request");
@@ -626,7 +632,7 @@ await reset({ version: 3, snippets: [] });
 
 // ══════════════ 13. 保留分类语义 ══════════════
 setGroup("13. 保留分类语义");
-await reset({ version: 3, snippets: [] });
+await reset({ version: 4, snippets: [] });
 {
   await call("save", { name: "保类", content: "c1", category: "原类" });
   await call("save", { name: "保类", content: "c2" });
@@ -636,6 +642,57 @@ await reset({ version: 3, snippets: [] });
   await call("save", { name: "保类", content: "c3", category: "" });
   const cleared = (await call("list", {})).value.snippets.find((s) => s.name === "保类");
   check("显式空 category 清空分类", cleared.category === null, String(cleared.category));
+}
+
+// ══════════════ 14. v1.3 标签 / 收藏 / 版本历史 ══════════════
+setGroup("14. v1.3 标签 / 收藏 / 版本历史");
+await reset({ version: 4, snippets: [] });
+{
+  // 新建带 tags + pinned
+  const created = await call("save", { name: "带标签", content: "内容", tags: ["代码", " 代码 ", "审查"], pinned: true });
+  const s0 = created.value.snippet;
+  check("新建带标签去重并 trim", JSON.stringify(s0.tags) === JSON.stringify(["代码", "审查"]), JSON.stringify(s0.tags));
+  check("新建收藏置顶", s0.pinned === true && typeof s0.pinnedAt === "number", String(s0.pinnedAt));
+
+  // 不带 tags/pinned 字段 → 保留（keep 语义）
+  await call("save", { name: "带标签", content: "内容2", expectedRevision: s0.revision });
+  let cur = (await call("list", {})).value.snippets.find((s) => s.name === "带标签");
+  check("更新不带 tags 保留原标签", JSON.stringify(cur.tags) === JSON.stringify(["代码", "审查"]), JSON.stringify(cur.tags));
+  check("更新不带 pinned 保留收藏", cur.pinned === true);
+
+  // 显式清空 tags / 取消收藏
+  await call("save", { name: "带标签", content: "内容3", tags: [], pinned: false, expectedRevision: cur.revision });
+  cur = (await call("list", {})).value.snippets.find((s) => s.name === "带标签");
+  check("显式空 tags 清空", JSON.stringify(cur.tags) === JSON.stringify([]), JSON.stringify(cur.tags));
+  check("显式 pinned=false 取消收藏", cur.pinned === false && cur.pinnedAt === null, String(cur.pinnedAt));
+
+  // 版本历史：每次更新都留档上一版
+  const hist = await call("history", { id: cur.id });
+  check("history 返回数组", Array.isArray(hist.value.history), String(hist.value.history?.length));
+  check("历史按版本保留（≥2 版）", hist.value.history.length >= 2, String(hist.value.history.length));
+  check("历史含被覆盖的内容", hist.value.history.some((v) => v.content === "内容2"), JSON.stringify(hist.value.history.map((v) => v.content)));
+  check("历史记录带 revision", hist.value.history.every((v) => typeof v.revision === "number"));
+
+  // history 端点缺 id 报错
+  const noId = await call("history", {});
+  check("history 缺 id 报 bad-request", noId.ok === false && noId.error.code === "bad-request");
+
+  // 命令：pin / unpin / tag
+  await call("save", { name: "命令测试", content: "x" });
+  const pinR = await cmd("pin 命令测试");
+  check("命令 pin 成功", pinR.kind === "success" && pinR.text.includes("已收藏"), pinR.text);
+  const unpinR = await cmd("unpin 命令测试");
+  check("命令 unpin 成功", unpinR.kind === "success" && unpinR.text.includes("取消收藏"), unpinR.text);
+  const tagR = await cmd("tag 命令测试 甲、乙 丙");
+  check("命令 tag 成功", tagR.kind === "success" && tagR.text.includes("甲"), tagR.text);
+  const tagged = (await call("list", {})).value.snippets.find((s) => s.name === "命令测试");
+  check("tag 命令落盘（顿号/空格分隔）", JSON.stringify(tagged.tags) === JSON.stringify(["甲", "乙", "丙"]), JSON.stringify(tagged.tags));
+
+  // list 命令输出含 ★ 与标签
+  await call("save", { name: "置顶项", content: "y", pinned: true, tags: ["重要"] });
+  const listText = (await cmd("list")).text;
+  check("list 输出收藏标记", listText.includes("★置顶项"), listText.split("\n").find((l) => l.includes("置顶项")));
+  check("list 输出标签", listText.includes("(重要)"));
 }
 
 // ══════════════ 输出 ══════════════

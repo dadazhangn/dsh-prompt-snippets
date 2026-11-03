@@ -2,6 +2,10 @@
 
 [![CI](https://github.com/dadazhangn/dsh-prompt-snippets/actions/workflows/ci.yml/badge.svg)](https://github.com/dadazhangn/dsh-prompt-snippets/actions/workflows/ci.yml)
 
+<p align="center">
+  <img src="docs/feature-map.svg" alt="Prompt Snippets 占位符三态填充流程" width="800">
+</p>
+
 保存并一键插入可复用的提示词片段，支持分类与 `{{占位符}}`。
 
 一个让「常用提示词」随手可得、不重复造轮子的 DSH 插件。片段数据保存在本机
@@ -78,6 +82,12 @@ and reload the page.
     也可选「保留占位符插入」原样插入。
 
   `\{{字面量}}` 转义后插入的是字面 `{{字面量}}`；同名占位符只问一次，全实例填同一个值。
+- **动态变量**：`{{date}}` / `{{time}}` / `{{datetime}}` 是内置宏变量，插入时用本地时间实时
+  替换（`date` = `YYYY-MM-DD`、`time` = `HH:mm`、`datetime` = `YYYY-MM-DD HH:mm:ss`），
+  不弹表单、也不进变量元数据；正文里只有动态变量的片段点一下即可直插。
+- **内置模板包**：首次运行（数据文件尚不存在）自动预置一组高频片段（代码审查、Git 提交信息、
+  Bug 排查、周报、日报、翻译润色、会议纪要、学习计划），给你一个冷启动起点。删掉后不重灌，
+  已有数据文件（哪怕清空成 0 条）也不会再注入。
 - **导入 / 导出**：`/snippet export [文件名]` 把全部片段导出成 JSON，落在
   `<DSH_HOME>/data/prompt-snippets/exports/` 下；`/snippet import <文件路径>` 导回来，
   `--replace` 用文件内容替换现有库（未出现在文件里的片段软删除，仍可 `/snippet undo`），
@@ -89,6 +99,16 @@ and reload the page.
 - **可拖动可记忆**：拖标题栏移动面板，位置记在浏览器本地，下次打开还在原处。
 - **可缩放可记忆**：面板四条边和四个角都能拖（像 Windows 窗口），拖边缘调宽高（最小 200×160），
   松手后尺寸记在浏览器本地，下次打开沿用上次大小；缩到超出视口会自动收窄拉回。
+- **标签**：`/snippet tag <名称> <标签1、标签2…>` 给片段打标签（逗号/顿号/空格分隔，最多 32 个、
+  每个最长 24 字）；`add`/`save` 也能用 `--tag=` 带上。面板里标签以圆角 chip 显示在名称后。
+- **收藏置顶**：`/snippet pin <名称>` 收藏、`/snippet unpin <名称>` 取消（`add` 也可 `--pin`）。
+  面板顶部有「全部 / ★ 收藏 / 最近使用」三个视图切换按钮，收藏视图只看置顶项，
+  最近使用按 `lastUsedAt` 降序、最多 20 条。
+- **版本历史**：每次保存前的旧内容自动留档（每片段最多 20 版、单片段历史体积超限丢最旧）。
+  面板里点 🕘 展开该片段的历史，可回看历次正文；`/snippet show` 也会显示 revision 号。
+- **命令面板（全局快捷唤起）**：任意时刻按 `Ctrl+Shift+K`（或 `Ctrl+Shift+P`）弹出片段搜索
+  浮层，输入关键字即时过滤（名称/分类/标签/正文），`↑` `↓` 选择、`Enter` 插入、`Esc` 关闭；
+  收藏片段自动置顶，无需先点开 dock 面板。
 
 ## 使用
 
@@ -100,6 +120,8 @@ and reload the page.
 /snippet rm 代码审查
 /snippet undo 代码审查
 /snippet mv 周报 日报
+/snippet pin 周报
+/snippet tag 周报 工作、总结
 /snippet optimize 周报
 /snippet export 我的片段
 /snippet import 我的片段.json --dry
@@ -112,10 +134,10 @@ and reload the page.
 ## 数据
 
 - 文件：`<DSH_HOME>/data/prompt-snippets/snippets.json`（DSH_HOME 未设置时为 `~/.dsh`）。
-- 结构（`version: 3`）：
+- 结构（`version: 4`）：
   ```json
   {
-    "version": 3,
+    "version": 4,
     "snippets": [
       {
         "id": "uuid",
@@ -123,6 +145,9 @@ and reload the page.
         "category": "分类或 null",
         "content": "正文",
         "variables": { "变量名": { "label": "…", "default": "…", "options": ["…"], "required": false } },
+        "tags": ["标签"],
+        "pinned": false,
+        "pinnedAt": null,
         "createdAt": 0,
         "updatedAt": 0,
         "deletedAt": null,
@@ -138,12 +163,14 @@ and reload the page.
 - **写入是串行的**：并发保存/删除排队执行，不会互相覆盖。
 - **每次都留 `.bak`**：`snippets.json.bak` 永远是上一次成功写入的完整 JSON，
   手滑改坏也能逐字节恢复。
+- **备份轮换**：`.bak` 写新值前先逐级后移成 `.bak.1` / `.bak.2` … 最多保留 7 份，
+  `.bak` 始终是最新一份，更早的历史可回查。
 - **损坏自愈**：文件不是合法 JSON 或结构不可识别时，会备份成
   `snippets.corrupt-<时间戳>.json`（最多保留 5 份），插件以空库继续运行并在面板顶部
   提示，不会卡死；第二次读取不会再重复备份。
-- **旧版本自动迁移**：`version: 1` / `version: 2` 的文件在首次读取时补齐
-  `id` / `revision` / `variables` / `useCount` 等字段并升级到 `version: 3`，
-  迁移写入前先把**原始字节**存成 `snippets.json.pre-v3.bak`（一次性，已存在则保留
+- **旧版本自动迁移**：`version: 1` / `version: 2` / `version: 3` 的文件在首次读取时补齐
+  `id` / `revision` / `variables` / `useCount` / `tags` / `pinned` 等字段并升级到 `version: 4`，
+  迁移写入前先把**原始字节**存成 `snippets.json.pre-v4.bak`（一次性，已存在则保留
   更早的那份、不覆盖），原有片段与时间戳保持不变。迁移是幂等的：第二次读取不再写盘。
 - **保守处理异常数据**：无法识别的条目会被丢弃并给出 `warning` 计数；重复 `id`
   会被修复；`revision` 非法值归一到 1。
@@ -177,14 +204,14 @@ test/               测试套件（随仓库分发，不进 npm 包）
 
 ## 测试
 
-仓库 `test/` 目录里有一组自测脚本（随仓库分发，不进 npm 包），当前覆盖 **417 条断言**：
+仓库 `test/` 目录里有一组自测脚本（随仓库分发，不进 npm 包），当前覆盖 **466 条断言**：
 
 | 套件 | 覆盖 |
 |---|---|
-| `v110-host-test.mjs` | 迁移矩阵与迁移前备份、存储可靠性、双轨匹配、占位符扫描、`--cat` 收口、能力握手、只读保护（156） |
+| `v110-host-test.mjs` | 迁移矩阵与迁移前备份、存储可靠性、双轨匹配、占位符扫描、`--cat` 收口、能力握手、只读保护、标签/收藏/版本历史、首次预置模板包（177） |
 | `optimize-test.mjs` | 优化流的分支与降级（14） |
-| `io-test.mjs` | 导入/导出命令：落盘、文件名安全、后缀回退、merge/replace/dry、往返一致、同名去重、大小限制（74） |
-| `client-test.mjs` | 渲染、搜索高亮、命中计数、键盘导航、插入、占位符表单、行内编辑、冲突处理、多条撤销、优化三态对比（含优化后编辑）、导入导出按钮、使用统计 touch、主题 token、窄屏、窗口缩放（167） |
+| `io-test.mjs` | 导入/导出命令：落盘、文件名安全、后缀回退、merge/replace/dry、往返一致、同名去重、大小限制、一键打开（78） |
+| `client-test.mjs` | 渲染、搜索高亮、命中计数、键盘导航、插入、占位符表单、行内编辑、冲突处理、多条撤销、优化三态对比（含优化后编辑）、导入导出按钮、使用统计 touch、主题 token、窄屏、窗口缩放、标签/收藏/视图切换/版本历史、命令面板、动态变量（191） |
 | `client-error-test.mjs` | 插入失败的报错链路（6） |
 
 测试通过 `isolate-home.mjs` 把 `DSH_HOME` 顶到系统临时目录，**绝不读写真实片段库**。

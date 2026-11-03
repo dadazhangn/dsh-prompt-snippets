@@ -1,19 +1,83 @@
 import { mkdir, readFile, writeFile, rename, unlink, open, copyFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export const name = "prompt-snippets";
 export const inject = ["connection", "commands", "webServer"];
 
 const CHANNEL = "/prompt-snippets";
-const STORE_VERSION = 3;
+const STORE_VERSION = 4;
 const MAX_NAME = 120;
 const MAX_CONTENT = 200_000;
 const MAX_VARIABLES = 64;
+const MAX_TAGS = 32;
+const MAX_TAG_LEN = 24;
 const CORRUPT_KEEP = 5;
+// 版本历史：每个片段单独一份文件，保留最近 N 版。
+const HISTORY_KEEP = 20;
+const HISTORY_MAX_BYTES = 2_000_000;
+// .bak 轮换份数（1..N，轮转保留）
+const BAK_ROTATE = 7;
 // 导入 JSON 大小上限（UTF-8 字节）：防内存被打爆，也让恶意/损坏文件止步。
 const MAX_IMPORT_BYTES = 8_000_000;
+
+// 动态宏变量：插入时由 client 用本地时间实时替换，不落进 variables 元数据、
+// 不参与必填/默认值校验。与 client.js 的 DYNAMIC_VAR_NAMES 保持一致。
+const DYNAMIC_VAR_NAMES = new Set(["date", "time", "datetime"]);
+
+// 内置模板包：仅首次运行（数据文件尚不存在）时预置，给空库一个冷启动起点。
+// 用户删除后不再重灌；已有数据文件（哪怕空）绝不注入，避免覆盖用户选择。
+const TEMPLATE_PACK = [
+  {
+    name: "代码审查",
+    category: "开发",
+    tags: ["代码", "审查"],
+    content: "请审查下面这段代码，重点关注 {{关注点}}，指出潜在 bug、性能问题与可读性改进，并给出修改建议。\n\n```\n{{代码}}\n```",
+  },
+  {
+    name: "Git 提交信息",
+    category: "开发",
+    tags: ["git", "提交"],
+    content: "请根据以下变更，生成一条规范的 git commit message（约定式提交风格，一行标题 + 空行 + 要点式正文）：\n\n{{变更说明}}",
+  },
+  {
+    name: "Bug 排查",
+    category: "开发",
+    tags: ["bug", "排查"],
+    content: "我遇到一个问题：{{现象}}。相关环境：{{环境}}。已尝试：{{已尝试}}。请按「现象 → 根因假设 → 验证方法 → 修复方案」逐步分析。",
+  },
+  {
+    name: "周报",
+    category: "写作",
+    tags: ["周报", "工作"],
+    content: "请根据以下要点，帮我整理成一份结构清晰的周报（本周完成 / 进行中 / 下周计划 / 风险与求助）：\n\n{{要点}}",
+  },
+  {
+    name: "翻译润色",
+    category: "写作",
+    tags: ["翻译", "润色"],
+    content: "请把下面的内容翻译成 {{目标语言}}，并润色为自然流畅的表达，保留原意与格式：\n\n{{原文}}",
+  },
+  {
+    name: "日报",
+    category: "写作",
+    tags: ["日报", "工作"],
+    content: "今天是 {{date}}，请根据以下要点帮我生成一份工作日报（今日完成 / 明日计划 / 需要协调）：\n\n{{要点}}",
+  },
+  {
+    name: "会议纪要",
+    category: "写作",
+    tags: ["会议", "纪要"],
+    content: "请把下面的会议记录整理成纪要（结论 / 待办与负责人 / 时间点）：\n\n{{记录}}",
+  },
+  {
+    name: "学习计划",
+    category: "学习",
+    tags: ["学习", "计划"],
+    content: "我想在 {{时间}} 内掌握 {{主题}}，目前基础是 {{当前水平}}。请制定一个可执行的学习计划，分阶段列出目标、内容与检验方式。",
+  },
+];
 
 /** 本 host 半支持的全部 RPC 端点。client 半用 capabilities 握手校验。 */
 const ENDPOINTS = [
@@ -27,6 +91,7 @@ const ENDPOINTS = [
   "touch",
   "export",
   "import",
+  "history",
 ];
 
 /** 解析 DSH 数据根目录（等价于 dshHomePath：$DSH_HOME 或 ~/.dsh）。 */
@@ -46,16 +111,18 @@ function byteLength(text) {
 }
 
 /**
- * 数据模型 v3（存于 <home>/data/prompt-snippets/snippets.json）：
+ * 数据模型 v4（存于 <home>/data/prompt-snippets/snippets.json）：
  * {
- *   version: 3,
+ *   version: 4,
  *   snippets: [{
  *     id, name, category, content,
  *     variables: { [变量名]: { label?, default?, options?, required? } },
  *     createdAt, updatedAt,
  *     revision,      // 片段级单调递增，从 1 起；乐观锁用
  *     deletedAt,     // 非空 = 软删除，保留以便 restore
- *     useCount, lastUsedAt
+ *     useCount, lastUsedAt,
+ *     tags: string[],  // 多选切面，与 category（单选层级）并存
+ *     pinned: boolean, pinnedAt
  *   }]
  * }
  */
@@ -162,6 +229,8 @@ function normalizeVariables(names, input) {
     if (!names.includes(key)) dropped.push(key);
   }
   for (const nm of names.slice(0, MAX_VARIABLES)) {
+    // 动态宏变量（date/time/datetime）由 client 插入时实时替换，不进 variables 元数据
+    if (DYNAMIC_VAR_NAMES.has(nm)) continue;
     const src = source[nm];
     const def = {};
     if (src && typeof src === "object") {
@@ -176,6 +245,22 @@ function normalizeVariables(names, input) {
     out[nm] = def;
   }
   return { variables: out, dropped };
+}
+
+/** 规范化标签数组：去空、去重、裁剪、上限。 */
+function normalizeTags(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const t of input) {
+    if (typeof t !== "string") continue;
+    const tag = t.trim().slice(0, MAX_TAG_LEN);
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
 }
 
 /** 用给定值渲染；缺必填项时返回 missing。 */
@@ -198,10 +283,40 @@ function renderContent(tokens, variables, values) {
   return { text, missing };
 }
 
+/**
+ * 首次运行预置模板：仅当数据文件尚不存在（ENOENT）时调用一次。
+ * 返回带模板的空库；调用方负责落盘。之后用户删了也不重灌——
+ * 文件一旦存在（哪怕用户清空成 0 条），就不再注入，尊重用户选择。
+ */
+function seedTemplates() {
+  const now = Date.now();
+  const snippets = TEMPLATE_PACK.map((t, i) => {
+    const { names } = scanPlaceholders(t.content);
+    const { variables } = normalizeVariables(names, {});
+    return {
+      id: randomUUID(),
+      name: t.name,
+      category: t.category,
+      content: t.content,
+      variables,
+      createdAt: now + i,
+      updatedAt: now + i,
+      revision: 1,
+      deletedAt: null,
+      useCount: 0,
+      lastUsedAt: null,
+      tags: normalizeTags(t.tags),
+      pinned: false,
+      pinnedAt: null,
+    };
+  });
+  return { version: STORE_VERSION, snippets };
+}
+
 // ───────────────────────────── 迁移 ─────────────────────────────
 
 /**
- * 把任意历史版本整理成 v3。逐条容错：坏条目丢弃，其余保留。
+ * 把任意历史版本整理成 v4。逐条容错：坏条目丢弃，其余保留。
  * 返回 { store, stats }，stats 描述实际改动，用来决定是否落盘与提示文案。
  */
 function migrate(data) {
@@ -266,6 +381,23 @@ function migrate(data) {
       Number.isFinite(item.lastUsedAt) && item.lastUsedAt > 0 ? item.lastUsedAt : null;
     if (lastUsedAt !== (item.lastUsedAt ?? null)) changed = true;
 
+    // v4 新增：标签（多选切面）与收藏（置顶）
+    const tags = normalizeTags(item.tags);
+    if (JSON.stringify(tags) !== JSON.stringify(Array.isArray(item.tags) ? item.tags : [])) {
+      changed = true;
+    }
+    const pinned = item.pinned === true;
+    if (typeof item.pinned !== "undefined" && item.pinned !== true && item.pinned !== false) {
+      changed = true;
+    }
+    const pinnedAt = pinned
+      ? Number.isFinite(item.pinnedAt) && item.pinnedAt > 0
+        ? item.pinnedAt
+        : item.updatedAt
+      : null;
+    if (pinned && pinnedAt !== (item.pinnedAt ?? null)) changed = true;
+    if (item.pinnedAt != null && !pinned) changed = true; // 未收藏却带 pinnedAt → 清掉
+
     const { names } = scanPlaceholders(item.content);
     const varInput = item.variables && typeof item.variables === "object" ? item.variables : {};
     const hasVarKeys = Object.keys(varInput).length > 0;
@@ -291,6 +423,9 @@ function migrate(data) {
       deletedAt,
       useCount,
       lastUsedAt,
+      tags,
+      pinned,
+      pinnedAt,
     });
   }
 
@@ -337,13 +472,13 @@ function candidateList(hits) {
 }
 
 /**
- * 迁移前的一次性现场保护：把**原始字节**另存一份 `snippets.json.pre-v3.bak`。
+ * 迁移前的一次性现场保护：把**原始字节**另存一份 `snippets.json.pre-v4.bak`。
  * 用 flag "wx" 一次成型：要么完整写出，要么文件根本不存在，不会有半截备份；
  * 已经存在就不覆盖——那是更早、更原始的现场，比现在这份更值钱。
  * 备份失败只降级（不给 warning 噪声），不能因为备份把迁移卡死。
  */
 async function backupBeforeMigrate(raw) {
-  const name = "snippets.json.pre-v3.bak";
+  const name = "snippets.json.pre-v4.bak";
   try {
     await writeFile(dataPath(name), raw, { encoding: "utf8", flag: "wx" });
     return name;
@@ -364,7 +499,9 @@ async function readStore() {
     raw = await readFile(dataPath("snippets.json"), "utf8");
   } catch (error) {
     if (error && error.code === "ENOENT") {
-      return { store: emptyStore(), warnings: [], migrated: false, readOnly: false };
+      // 首次运行：预置内置模板包，给空库一个冷启动起点。
+      // 标记 migrated=true 让调用方落盘；此时 raw 为 undefined，不会误触发迁移前备份。
+      return { store: seedTemplates(), warnings: [], migrated: true, readOnly: false };
     }
     // EACCES / EIO 等：不隔离，避免把权限问题误判成损坏
     throw error;
@@ -497,6 +634,9 @@ async function persist(store) {
     } finally {
       if (bfh) await bfh.close().catch(() => {});
     }
+    // 先轮换历史链（把当前 .bak 顺移到 .bak.1，更老的逐级后移），
+    // 再把新备份 rename 到 .bak。这样 .bak.1..N 记录的是「再上一版」。
+    await rotateBackups();
     await rename(bakTmp, bak);
   } catch (error) {
     if (!error || error.code !== "ENOENT") {
@@ -509,6 +649,68 @@ async function persist(store) {
   } catch (error) {
     await unlink(tmp).catch(() => {});
     throw error;
+  }
+}
+
+/** .bak 轮换：把当前 .bak 顺移为 .bak.1，.bak.1→.bak.2 …，最老的 .bak.N 丢弃。 */
+async function rotateBackups() {
+  try {
+    // 先删最老的一份，腾出位置
+    await unlink(dataPath(`snippets.json.bak.${BAK_ROTATE}`)).catch(() => {});
+    // 逐级后移：.bak.(N-1) → .bak.N
+    for (let n = BAK_ROTATE; n > 1; n--) {
+      await rename(dataPath(`snippets.json.bak.${n - 1}`), dataPath(`snippets.json.bak.${n}`)).catch(() => {});
+    }
+    // 当前 .bak → .bak.1（rename 后 .bak 名空出，等调用方 rename 新备份进来）
+    await rename(dataPath("snippets.json.bak"), dataPath("snippets.json.bak.1")).catch(() => {});
+  } catch (_) {
+    /* 轮换失败仅降级 */
+  }
+}
+
+// ───────────────────────────── 版本历史 ─────────────────────────────
+// 每个片段独立一个文件 <home>/data/prompt-snippets/history/<id>.json，
+// 只记录「被替换掉的那一版」，当前版永远在主库；不随导出分发。
+
+function historyPath(id) {
+  return dataPath("history", `${id}.json`);
+}
+
+/** 记录一次历史版本（prev = 被覆盖的那一版）。保留最近 HISTORY_KEEP 版，超体积丢最旧。 */
+async function recordHistory(id, prev) {
+  if (!id || !prev || typeof prev.content !== "string") return;
+  try {
+    await mkdir(dataPath("history"), { recursive: true });
+    const file = historyPath(id);
+    let list = [];
+    try {
+      const parsed = JSON.parse(await readFile(file, "utf8"));
+      if (Array.isArray(parsed)) list = parsed;
+    } catch (_) {
+      /* 无历史文件 = 空列表 */
+    }
+    list.push(prev);
+    if (list.length > HISTORY_KEEP) list = list.slice(list.length - HISTORY_KEEP);
+    // 单片段历史体积上限：超了就丢最旧，保证历史文件不会无限膨胀
+    let payload = JSON.stringify(list);
+    while (byteLength(payload) > HISTORY_MAX_BYTES && list.length > 1) {
+      list.shift();
+      payload = JSON.stringify(list);
+    }
+    await writeFile(file, payload, "utf8");
+  } catch (_) {
+    /* 历史写入失败只降级，不影响主流程 */
+  }
+}
+
+/** 读取某片段的历史版本（新→旧）。读失败/不存在都返回空数组。 */
+async function listHistory(id) {
+  try {
+    const raw = await readFile(historyPath(id), "utf8");
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch (_) {
+    return [];
   }
 }
 
@@ -692,6 +894,12 @@ async function saveSnippet(payload) {
       ? payload.expectedRevision
       : null;
   const rawRef = typeof payload?.ref === "string" ? payload.ref : null;
+  const tags = normalizeTags(payload?.tags);
+  const hasTagsField = !!payload && typeof payload === "object" && "tags" in payload;
+  const keepTags = payload?.keepTags === true || !hasTagsField;
+  const hasPinnedField = !!payload && typeof payload === "object" && "pinned" in payload;
+  const pinned = payload?.pinned === true;
+  const keepPinned = payload?.keepPinned === true || !hasPinnedField;
 
   if (!name) return fail("bad-request", "片段名称不能为空");
   if (name.length > MAX_NAME) return fail("bad-request", `片段名称不能超过 ${MAX_NAME} 个字符`);
@@ -701,7 +909,11 @@ async function saveSnippet(payload) {
   const { names } = scanPlaceholders(content);
   const { variables, dropped } = normalizeVariables(names, payload?.variables);
 
-  return transact((store) => {
+  // 在锁内取被覆盖版本的快照，锁外再落历史文件（历史是独立文件，不进主库事务）
+  let historySnapshot = null;
+  let historyId = null;
+
+  const result = await transact((store) => {
     const now = Date.now();
     let existing = null;
 
@@ -745,10 +957,26 @@ async function saveSnippet(payload) {
       if (other) {
         return conflictError("name", `已有另一个片段叫「${name}」。`, other);
       }
+      // 记历史：被覆盖的这一版（name/content/variables 快照）
+      historyId = existing.id;
+      historySnapshot = {
+        name: existing.name,
+        content: existing.content,
+        variables: existing.variables,
+        category: existing.category,
+        tags: existing.tags,
+        at: existing.updatedAt,
+        revision: existing.revision,
+      };
       existing.name = name;
       existing.content = content;
       existing.variables = variables;
       if (!keepCategory) existing.category = category;
+      if (!keepTags) existing.tags = tags;
+      if (!keepPinned) {
+        existing.pinned = pinned;
+        existing.pinnedAt = pinned ? now : null;
+      }
       existing.updatedAt = now;
       existing.revision += 1;
       const result = {
@@ -778,6 +1006,9 @@ async function saveSnippet(payload) {
       deletedAt: null,
       useCount: 0,
       lastUsedAt: null,
+      tags,
+      pinned,
+      pinnedAt: pinned ? now : null,
     };
     store.snippets.push(record);
     return {
@@ -787,6 +1018,11 @@ async function saveSnippet(payload) {
       value: { ...view(store).value, snippet: record },
     };
   });
+
+  if (result.ok && historySnapshot) {
+    await recordHistory(historyId, historySnapshot);
+  }
+  return result;
 }
 
 async function deleteSnippet(payload) {
@@ -969,6 +1205,8 @@ function buildExport(store, ids) {
       category: s.category,
       content: s.content,
       variables: s.variables,
+      tags: s.tags || [],
+      pinned: s.pinned === true,
     })),
   };
 }
@@ -1010,6 +1248,8 @@ function parseImport(raw) {
       category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : null,
       content: item.content,
       variables,
+      tags: normalizeTags(item.tags),
+      pinned: item.pinned === true,
     };
     // 后者覆盖前者：从 out 里拿掉旧的那条，同名的进不了「seen 已处理」的陷阱
     if (seen.has(nm)) {
@@ -1062,6 +1302,9 @@ async function importSnippets(payload) {
           exist.content = item.content;
           exist.variables = item.variables;
           exist.category = item.category;
+          exist.tags = item.tags || [];
+          exist.pinned = item.pinned === true;
+          exist.pinnedAt = item.pinned === true ? now : null;
           exist.updatedAt = now;
           if (exist.deletedAt !== null && exist.deletedAt !== undefined) exist.deletedAt = null;
           exist.revision += 1;
@@ -1081,6 +1324,9 @@ async function importSnippets(payload) {
             deletedAt: null,
             useCount: 0,
             lastUsedAt: null,
+            tags: item.tags || [],
+            pinned: item.pinned === true,
+            pinnedAt: item.pinned === true ? now : null,
           };
           store.snippets.push(fresh);
           matched.add(fresh.id);
@@ -1118,15 +1364,21 @@ async function importSnippets(payload) {
 // ─────────────────── 命令参数：--cat 只认行尾 ───────────────────
 
 /**
- * 严格行尾判定，正文中间的 --cat 原样保留。
+ * 严格行尾判定，正文中间的 --cat/--tag/--pin 原样保留。
  *   add <名称> <正文…> --cat=<分类>     → 取分类
  *   add <名称> <正文…> --cat <分类>     → 仅当 --cat 是倒数第二个 token
+ *   add <名称> <正文…> --tag=a,b       → 标签（逗号分隔，可多个 --tag）
+ *   add <名称> <正文…> --pin           → 收藏置顶
  *   add <名称> <正文…> -- --cat         → "--" 之后全按字面，可写结尾的 --cat
  */
 function parseAddArgs(rest) {
   let tokens = rest.slice();
   let category = null;
   let hasCategory = false;
+  let tags = [];
+  let hasTags = false;
+  let pinned = false;
+  let hasPinned = false;
   let notice = null;
 
   const dashDash = tokens.indexOf("--");
@@ -1140,39 +1392,107 @@ function parseAddArgs(rest) {
     tail = null;
   }
 
-  const last = head.length > 0 ? head[head.length - 1] : null;
-  if (last !== null && (last.startsWith("--cat=") || last.startsWith("-c="))) {
-    const eq = last.indexOf("=");
-    category = last.slice(eq + 1).trim() || null;
-    hasCategory = true;
-    head.pop();
-  } else if (head.length >= 2) {
-    const prev = head[head.length - 2];
-    if (prev === "--cat" || prev === "-c") {
-      category = head[head.length - 1].trim() || null;
-      hasCategory = true;
-      head.length -= 2;
-    }
-  }
-  if (!hasCategory && head.length >= 1) {
-    const lastTok = head[head.length - 1];
-    if (lastTok === "--cat" || lastTok === "-c") {
-      hasCategory = true;
-      category = null;
+  // 循环消费行尾选项：--pin 无值，--cat/-c 与 --tag/-t 有值（=或空格）
+  let consumed = true;
+  while (consumed && head.length > 0) {
+    consumed = false;
+    const last = head[head.length - 1];
+    if (last === "--pin" || last === "-p") {
+      pinned = true;
+      hasPinned = true;
       head.pop();
+      consumed = true;
+      continue;
+    }
+    if (last.startsWith("--cat=") || last.startsWith("-c=")) {
+      const eq = last.indexOf("=");
+      category = last.slice(eq + 1).trim() || null;
+      hasCategory = true;
+      head.pop();
+      consumed = true;
+      continue;
+    }
+    if (last.startsWith("--tag=") || last.startsWith("-t=")) {
+      const eq = last.indexOf("=");
+      const v = last.slice(eq + 1).trim();
+      if (v) {
+        tags = tags.concat(v.split(/[,，、]/).map((t) => t.trim()).filter(Boolean));
+        hasTags = true;
+      }
+      head.pop();
+      consumed = true;
+      continue;
+    }
+    // 裸 --cat/-c 结尾：显式清空分类（区别于「正文里的 --cat 原样保留」）
+    if (last === "--cat" || last === "-c") {
+      category = null;
+      hasCategory = true;
+      head.pop();
+      consumed = true;
+      continue;
+    }
+    // 裸 --tag/-t 结尾：显式清空标签
+    if (last === "--tag" || last === "-t") {
+      tags = [];
+      hasTags = true;
+      head.pop();
+      consumed = true;
+      continue;
+    }
+    if (head.length >= 2) {
+      const prev = head[head.length - 2];
+      if (prev === "--cat" || prev === "-c") {
+        category = head[head.length - 1].trim() || null;
+        hasCategory = true;
+        head.length -= 2;
+        consumed = true;
+        continue;
+      }
+      if (prev === "--tag" || prev === "-t") {
+        const v = head[head.length - 1].trim();
+        if (v) {
+          tags = tags.concat(v.split(/[,，、]/).map((t) => t.trim()).filter(Boolean));
+          hasTags = true;
+        }
+        head.length -= 2;
+        consumed = true;
+        continue;
+      }
     }
   }
 
   const contentTokens = tail === null ? head : head.concat(tail);
 
-  if (!hasCategory) {
-    const hit = contentTokens.find((t) => t === "--cat" || t === "-c" || t.startsWith("--cat=") || t.startsWith("-c="));
+  if (!hasCategory && !hasTags && !hasPinned) {
+    const hit = contentTokens.find(
+      (t) =>
+        t === "--cat" ||
+        t === "-c" ||
+        t.startsWith("--cat=") ||
+        t.startsWith("-c=") ||
+        t === "--tag" ||
+        t === "-t" ||
+        t.startsWith("--tag=") ||
+        t.startsWith("-t=") ||
+        t === "--pin" ||
+        t === "-p"
+    );
     if (hit) {
-      notice = `正文里的「${hit}」已按字面保留。要设置分类请写在行尾（--cat=分类），或先用 -- 结束选项。`;
+      notice = `正文里的「${hit}」已按字面保留。要设置分类/标签/收藏请写在行尾（--cat=分类 --tag=标签 --pin），或先用 -- 结束选项。`;
     }
   }
 
-  return { name: contentTokens[0] ?? "", content: contentTokens.slice(1).join(" "), category, hasCategory, notice };
+  return {
+    name: contentTokens[0] ?? "",
+    content: contentTokens.slice(1).join(" "),
+    category,
+    hasCategory,
+    tags: tags.slice(0, MAX_TAGS),
+    hasTags,
+    pinned,
+    hasPinned,
+    notice,
+  };
 }
 
 // ───────────────────────────── 分派 ─────────────────────────────
@@ -1224,6 +1544,13 @@ async function dispatch(ctx, endpoint, payload, signal) {
       touchIds(payload?.ids);
       return { ok: true, value: {} };
 
+    case "history": {
+      const id = typeof payload?.id === "string" ? payload.id : "";
+      if (!id) return fail("bad-request", "需要提供 id");
+      const list = await listHistory(id);
+      return { ok: true, value: { id, history: list } };
+    }
+
     case "optimize": {
       let content = typeof payload?.content === "string" ? payload.content : "";
       if (!content.trim() && typeof payload?.id === "string" && payload.id) {
@@ -1239,6 +1566,28 @@ async function dispatch(ctx, endpoint, payload, signal) {
       const { store, warnings } = await readAndMigrate();
       const device = buildExport(store, payload?.ids);
       const json = JSON.stringify(device, null, 2);
+      // revealPath（面板「打开」按钮）只想用系统文件管理器打开一个已存在的文件，
+      // 不重新落盘、不重新生成内容——否则会覆盖掉用户手工改过的导出文件。
+      if (typeof payload?.revealPath === "string" && payload.revealPath.trim() !== "") {
+        const p = payload.revealPath.trim();
+        let revealed = false;
+        let revealError = null;
+        if (process.platform === "win32") {
+          try {
+            const { spawn } = await import("node:child_process");
+            await new Promise((resolve) => {
+              const child = spawn("explorer.exe", [`/select,${p}`], { stdio: "ignore", detached: true });
+              child.on("error", () => resolve(false));
+              child.on("spawn", () => resolve(true));
+              setTimeout(() => resolve(true), 500);
+            });
+            revealed = true;
+          } catch (error) {
+            revealError = error instanceof Error ? error.message : String(error);
+          }
+        }
+        return { ok: true, value: { path: p, revealed, revealError: revealError || undefined } };
+      }
       // payload.write = 文件名（字符串）时，落盘到数据目录的 exports/ 并回传路径。
       // 面板没有文件选择器，走这条路把文件实实在在交到用户手上。
       if (typeof payload?.write === "string") {
@@ -1251,9 +1600,36 @@ async function dispatch(ctx, endpoint, payload, signal) {
         } catch (error) {
           return fail("internal", `写入导出文件失败：${error instanceof Error ? error.message : String(error)}`);
         }
+        // 请求方要求打开导出文件所在目录时，用系统默认方式 reveal（Windows: explorer /select）。
+        // 打开失败只降级不报错——用户仍可凭回传的绝对路径手动定位。
+        let revealed = false;
+        let revealError = null;
+        if (payload.reveal === true && process.platform === "win32") {
+          try {
+            const { spawn } = await import("node:child_process");
+            await new Promise((resolve) => {
+              const p = spawn("explorer.exe", [`/select,${target}`], { stdio: "ignore", detached: true });
+              p.on("error", () => resolve(false));
+              p.on("spawn", () => resolve(true));
+              // explorer 可能已经存在则立即退出，也可能挂起；500ms 兜底，不阻塞导出结果
+              setTimeout(() => resolve(true), 500);
+            });
+            revealed = true;
+          } catch (error) {
+            revealError = error instanceof Error ? error.message : String(error);
+          }
+        }
         return {
           ok: true,
-          value: { json, count: device.snippets.length, path: target, warning: warnings.join("\n") || undefined },
+          value: {
+            json,
+            count: device.snippets.length,
+            path: target,
+            dir: dirname(target),
+            revealed,
+            revealError: revealError || undefined,
+            warning: warnings.join("\n") || undefined,
+          },
         };
       }
       return {
@@ -1306,8 +1682,8 @@ async function dispatch(ctx, endpoint, payload, signal) {
   }
 }
 
-const ADD_USAGE = "/snippet add <名称> <内容> [--cat=<分类>]";
-const USAGE = `${ADD_USAGE} | list | show <名称> | rm <名称|#id> | undo <名称|#id> | mv <名称> <新名称> | optimize <名称> | export [文件名] | import <文件路径> [--replace] [--dry]`;
+const ADD_USAGE = "/snippet add <名称> <内容> [--cat=<分类>] [--tag=<标签>] [--pin]";
+const USAGE = `${ADD_USAGE} | list | show <名称> | rm <名称|#id> | undo <名称|#id> | mv <名称> <新名称> | pin <名称|#id> | unpin <名称|#id> | tag <名称|#id> <标签…> | optimize <名称> | export [文件名] | import <文件路径> [--replace] [--dry]`;
 
 /** 导出文件名不能带路径分隔符，也不能是 `.`/`..`，避免写出数据目录。 */
 function safeExportName(raw) {
@@ -1348,7 +1724,7 @@ export function apply(ctx) {
     name: "snippet",
     description: "管理提示词片段：保存、列出、查看、删除、恢复、改名、AI 优化、导入导出",
     input: {
-      hint: "add <名称> <内容> [--cat=<分类>] | list | show <名称> | rm <名称> | undo <名称> | mv <名称> <新名> | optimize <名称> | export [文件名] | import <文件> [--replace] [--dry]",
+      hint: "add <名称> <内容> [--cat=<分类>] [--tag=<标签>] [--pin] | list | show <名称> | rm <名称> | undo <名称> | mv <名称> <新名> | pin <名称> | unpin <名称> | tag <名称> <标签> | optimize <名称> | export [文件名] | import <文件> [--replace] [--dry]",
     },
     async handler({ rawInput, signal }) {
       const args = (rawInput ?? "").trim();
@@ -1369,7 +1745,9 @@ export function apply(ctx) {
           const lines = items.map((s, i) => {
             const vars = scanPlaceholders(s.content).names;
             const varTag = vars.length > 0 ? ` {${vars.join(", ")}}` : "";
-            return `${i + 1}. ${s.name}${s.category ? ` [${s.category}]` : ""}${varTag}`;
+            const tags = Array.isArray(s.tags) && s.tags.length > 0 ? ` (${s.tags.join("、")})` : "";
+            const pin = s.pinned ? "★" : "";
+            return `${i + 1}. ${pin}${s.name}${s.category ? ` [${s.category}]` : ""}${tags}${varTag}`;
           });
           return { kind: "success", text: `${head}已保存 ${items.length} 个片段：\n${lines.join("\n")}` };
         }
@@ -1388,6 +1766,9 @@ export function apply(ctx) {
           }
           const s = found.snippet;
           const vars = Object.entries(s.variables || {});
+          const tagText =
+            Array.isArray(s.tags) && s.tags.length > 0 ? `\n标签：${s.tags.join("、")}` : "";
+          const pinText = s.pinned ? "（已收藏）" : "";
           const varText =
             vars.length === 0
               ? ""
@@ -1401,7 +1782,7 @@ export function apply(ctx) {
                   .join("\n")}`;
           return {
             kind: "success",
-            text: `#${s.id.slice(0, 6)}  ${s.name}${s.category ? ` [${s.category}]` : ""}  rev ${s.revision}\n\n${s.content}${varText}`,
+            text: `#${s.id.slice(0, 6)}  ${s.name}${s.category ? ` [${s.category}]` : ""}${pinText}  rev ${s.revision}${tagText}\n\n${s.content}${varText}`,
           };
         }
 
@@ -1416,13 +1797,19 @@ export function apply(ctx) {
             content: parsed.content,
             category: parsed.category,
             keepCategory: !parsed.hasCategory,
+            tags: parsed.tags,
+            keepTags: !parsed.hasTags,
+            pinned: parsed.pinned,
+            keepPinned: !parsed.hasPinned,
           });
           if (!result.ok) return { kind: "error", text: result.error.message };
           const cat = parsed.hasCategory && parsed.category ? `（分类：${parsed.category}）` : "";
+          const tag = parsed.hasTags && parsed.tags.length ? `（标签：${parsed.tags.join("、")}）` : "";
+          const pin = parsed.hasPinned && parsed.pinned ? "（已收藏）" : "";
           const note = parsed.notice ? `\n提示：${parsed.notice}` : "";
           return {
             kind: "success",
-            text: `已${result.created ? "保存" : "更新"}片段「${parsed.name}」${cat}。${note}`,
+            text: `已${result.created ? "保存" : "更新"}片段「${parsed.name}」${cat}${tag}${pin}。${note}`,
           };
         }
 
@@ -1477,6 +1864,74 @@ export function apply(ctx) {
           });
           if (!result.ok) return { kind: "error", text: result.error.message };
           return { kind: "success", text: `已把「${target.name}」改名为「${newName}」。` };
+        }
+
+        case "pin":
+        case "unpin": {
+          const ref = rest.join(" ").trim();
+          if (!ref) return { kind: "error", text: `用法：/snippet ${verb} <名称|#id>` };
+          const { store } = await readAndMigrate();
+          const found = resolveRef(alive(store), ref);
+          if (found.missing) return { kind: "error", text: `未找到片段「${ref}」。` };
+          if (found.ambiguous) {
+            return {
+              kind: "error",
+              text: `有 ${found.ambiguous.length} 个片段都叫「${ref}」，无法确定：\n${candidateList(found.ambiguous).join("\n")}`,
+            };
+          }
+          const target = found.snippet;
+          const wantPin = verb === "pin";
+          const result = await saveSnippet({
+            id: target.id,
+            name: target.name,
+            content: target.content,
+            variables: target.variables,
+            keepCategory: true,
+            keepTags: true,
+            pinned: wantPin,
+            keepPinned: false,
+            expectedRevision: target.revision,
+          });
+          if (!result.ok) return { kind: "error", text: result.error.message };
+          return {
+            kind: "success",
+            text: wantPin ? `已收藏「${target.name}」。` : `已取消收藏「${target.name}」。`,
+          };
+        }
+
+        case "tag": {
+          const ref = rest[0];
+          const tagText = rest.slice(1).join(" ").trim();
+          if (!ref) return { kind: "error", text: "用法：/snippet tag <名称|#id> <标签1,标签2…>" };
+          const { store } = await readAndMigrate();
+          const found = resolveRef(alive(store), ref);
+          if (found.missing) return { kind: "error", text: `未找到片段「${ref}」。` };
+          if (found.ambiguous) {
+            return {
+              kind: "error",
+              text: `有 ${found.ambiguous.length} 个片段都叫「${ref}」，无法确定：\n${candidateList(found.ambiguous).join("\n")}`,
+            };
+          }
+          const target = found.snippet;
+          const tags = tagText
+            ? normalizeTags(tagText.split(/[,，、\s]+/).map((t) => t.trim()).filter(Boolean))
+            : [];
+          const result = await saveSnippet({
+            id: target.id,
+            name: target.name,
+            content: target.content,
+            variables: target.variables,
+            keepCategory: true,
+            tags,
+            keepTags: false,
+            keepPinned: true,
+            expectedRevision: target.revision,
+          });
+          if (!result.ok) return { kind: "error", text: result.error.message };
+          return {
+            kind: "success",
+            text: tags.length > 0 ? `已设置「${target.name}」的标签：${tags.join("、")}。` : `已清空「${target.name}」的标签。`,
+          };
         }
 
         case "optimize":
