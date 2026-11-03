@@ -46,6 +46,9 @@
     "README.md",
     "LICENSE"
   ],
+  "scripts": {
+    "test": "node test/v110-host-test.mjs && node test/optimize-test.mjs && node test/io-test.mjs && node test/client-test.mjs && node test/client-error-test.mjs"
+  },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

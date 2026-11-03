@@ -1,0 +1,649 @@
+// v1.1.0 host 端全量测试。覆盖：迁移矩阵、存储可靠性、双轨匹配、
+// 占位符扫描/渲染、--cat 收口、导入导出、touch 批量、能力握手。
+import { TEST_HOME } from "./isolate-home.mjs"; // 必须先顶 DSH_HOME 再 import 插件
+import { apply } from "../index.js";
+import { readFile, writeFile, readdir, mkdir, stat, copyFile } from "node:fs/promises";
+import { join } from "node:path";
+
+const results = [];
+let group = "";
+const setGroup = (g) => { group = g; results.push(`\n── ${g} ──`); };
+const check = (label, pass, extra) =>
+  results.push(`${pass ? "PASS" : "FAIL"}  ${label}${extra !== undefined ? "  — " + extra : ""}`);
+
+// ── 假 ctx：只提供用到的三个服务 ──
+let handler = null;
+let commandDef = null;
+const fakeLlm = { mode: "ok" };
+apply({
+  connection: { register(_o, _c, fn) { handler = fn; } },
+  commands: { register(def) { commandDef = def; } },
+  effect(fn) { try { fn(); } catch (_) {} },
+  get(key) {
+    if (key === "llm") {
+      if (fakeLlm.mode === "none") return undefined;
+      return {
+        async *stream(opts) {
+          if (fakeLlm.mode === "throw") throw new Error("模型炸了");
+          if (fakeLlm.mode === "empty") return;
+          const src = opts?.messages?.[0]?.content?.[0]?.text ?? "";
+          if (fakeLlm.mode === "dropvar") { yield { type: "text-delta", text: "优化后没有占位符" }; return; }
+          // 正常模式：保留输入里所有 {{占位符}}，证明校验能通过
+          const vars = [...src.matchAll(/\{\{([^{}]+)\}\}/gu)].map((m) => m[1]);
+          yield { type: "text-delta", text: `你是资深审查员。请审查：${vars.map((v) => `{{${v}}}`).join(" ")}` };
+        },
+      };
+    }
+    if (key === "agentDefaultModel") {
+      if (fakeLlm.mode === "none") return undefined;
+      return { currentSelection: () => ({ provider: "p", model: "m" }) };
+    }
+    return undefined;
+  },
+});
+
+const HOME = TEST_HOME;
+const DIR = join(HOME, "data", "prompt-snippets");
+const FILE = join(DIR, "snippets.json");
+const BAK = join(DIR, "snippets.json.bak");
+await mkdir(DIR, { recursive: true });
+
+const read = async () => JSON.parse(await readFile(FILE, "utf8"));
+const reset = async (data) => {
+  try {
+    for (const f of await readdir(DIR)) {
+      if (f !== "." && f !== "..") await writeFile(join(DIR, f), "", "utf8").catch(() => {});
+    }
+  } catch (_) {}
+  const { unlink } = await import("node:fs/promises");
+  for (const f of await readdir(DIR)) await unlink(join(DIR, f)).catch(() => {});
+  if (data !== null) await writeFile(FILE, typeof data === "string" ? data : JSON.stringify(data), "utf8");
+};
+const cmd = (line) => commandDef.handler({ rawInput: line, signal: undefined });
+const call = (ep, payload) => handler(ep, payload, undefined);
+
+// ══════════════ 1. 能力握手 ══════════════
+setGroup("1. 能力握手");
+{
+  const r = await call("capabilities", {});
+  check("capabilities 返回 ok", r.ok === true);
+  check("列出全部端点", Array.isArray(r.value?.endpoints) && r.value.endpoints.includes("restore"), r.value?.endpoints?.join(","));
+  check("storeVersion = 3", r.value?.storeVersion === 3, String(r.value?.storeVersion));
+  check("channel 正确", r.value?.channel === "/prompt-snippets", r.value?.channel);
+}
+
+// ══════════════ 2. 迁移矩阵 ══════════════
+setGroup("2. 迁移矩阵");
+
+// 2.1 无文件
+await reset(null);
+{
+  const r = await call("list", {});
+  check("无文件 → 空库成功", r.ok === true && r.value.snippets.length === 0);
+}
+
+// 2.2 v1 真实生产形态（无 id / 无 deletedAt / 无 revision）
+await reset({
+  version: 1,
+  snippets: [
+    { id: "keep-me", name: "老片段", category: "旧类", content: "老内容", createdAt: 1000, updatedAt: 2000 },
+    { name: "无id片段", content: "内容B", createdAt: 1500 },
+  ],
+});
+{
+  const r = await call("list", {});
+  const a = r.value.snippets.find((s) => s.name === "老片段");
+  const b = r.value.snippets.find((s) => s.name === "无id片段");
+  check("v1 两片段都读出", r.value.snippets.length === 2);
+  check("已有 id 保持不变", a?.id === "keep-me", a?.id);
+  check("缺 id 自动补齐", typeof b?.id === "string" && b.id.length === 36, b?.id);
+  check("createdAt 保持不变", a?.createdAt === 1000 && a?.updatedAt === 2000, `${a?.createdAt}/${a?.updatedAt}`);
+  check("category 保留", a?.category === "旧类", a?.category);
+  check("deletedAt 补 null", a?.deletedAt === null && b?.deletedAt === null);
+  check("revision 补 1", a?.revision === 1 && b?.revision === 1, `${a?.revision}/${b?.revision}`);
+  check("useCount 补 0", a?.useCount === 0 && b?.useCount === 0);
+  check("lastUsedAt 补 null", a?.lastUsedAt === null);
+  check("variables 补空对象", JSON.stringify(a?.variables) === "{}", JSON.stringify(a?.variables));
+  const disk = await read();
+  check("磁盘升到 version 3", disk.version === 3, String(disk.version));
+  // 迁移前的现场必须是**原始 v1 字节**，不是迁移后的结果
+  const preName = (await readdir(DIR)).find((f) => f === "snippets.json.pre-v3.bak");
+  check("迁移前留了 pre-v3 备份", !!preName, preName || "(无)");
+  if (preName) {
+    const pre = JSON.parse(await readFile(join(DIR, preName), "utf8"));
+    check("pre-v3 备份是原始 v1 内容", pre.version === 1 && pre.snippets.length === 2, `v${pre.version}/${pre.snippets?.length}`);
+    check("pre-v3 备份保留原始字段（无 revision）", pre.snippets.every((s) => s.revision === undefined));
+  }
+}
+
+// 2.3 脏数据：缺 name / content 非字符串 / 非对象
+await reset({
+  version: 2,
+  snippets: [
+    { id: "a", name: "", content: "x" },
+    { id: "b", content: "没有名字" },
+    { id: "c", name: "内容非法", content: 123 },
+    null,
+    "字符串条目",
+    { id: "d", name: "好条目", content: "有效内容" },
+  ],
+});
+{
+  const r = await call("list", {});
+  check("只保留 1 条有效", r.value.snippets.length === 1, String(r.value.snippets.length));
+  check("丢弃 5 条并给出 warning", typeof r.value.warning === "string" && r.value.warning.includes("丢弃了 5 条"), r.value.warning);
+}
+
+// 2.4 重复 id
+await reset({
+  version: 2,
+  snippets: [
+    { id: "dup", name: "甲", content: "1" },
+    { id: "dup", name: "乙", content: "2" },
+  ],
+});
+{
+  const r = await call("list", {});
+  const ids = r.value.snippets.map((s) => s.id);
+  check("重复 id 被修复（全唯一）", new Set(ids).size === 2, ids.join(","));
+  check("修复后给出 warning", typeof r.value.warning === "string" && r.value.warning.includes("重复 id"), r.value.warning);
+}
+
+// 2.5 deletedAt 是字符串 "0"
+await reset({
+  version: 2,
+  snippets: [{ id: "x", name: "串零", content: "c", deletedAt: "0" }],
+});
+{
+  const r = await call("list", {});
+  check('deletedAt="0" 归一为 null（视为未删除）', r.value.snippets.length === 1 && r.value.snippets[0].deletedAt === null);
+}
+
+// 2.6 revision 是 0 / 负数
+await reset({
+  version: 3,
+  snippets: [
+    { id: "r0", name: "零", content: "c", revision: 0 },
+    { id: "rn", name: "负", content: "c", revision: -5 },
+  ],
+});
+{
+  const r = await call("list", {});
+  const r0 = r.value.snippets.find((s) => s.id === "r0");
+  const rn = r.value.snippets.find((s) => s.id === "rn");
+  check("revision=0 归一到 1", r0?.revision === 1, String(r0?.revision));
+  check("revision=-5 归一到 1", rn?.revision === 1, String(rn?.revision));
+}
+
+// 2.7 variables 有正文中不存在的键
+await reset({
+  version: 3,
+  snippets: [{ id: "v1", name: "变量", content: "{{真实}}", variables: { 真实: { required: true }, 幽灵: {} } }],
+});
+{
+  const r = await call("list", {});
+  const v = r.value.snippets[0].variables;
+  check("保留正文里真实出现的变量", !!v["真实"] && v["真实"].required === true, JSON.stringify(v));
+  check("丢弃正文里不存在的变量键", !("幽灵" in v), JSON.stringify(v));
+}
+
+// 2.8 未来版本：拒绝加载且不动原文件
+await reset({ version: 9, snippets: [{ id: "z", name: "未来", content: "很新" }] });
+{
+  const before = await readFile(FILE, "utf8");
+  const r = await call("list", {});
+  const after = await readFile(FILE, "utf8");
+  check("未来版本 list 仍成功", r.ok === true);
+  check("未来版本返回空库", r.value.snippets.length === 0);
+  check("未来版本带 readOnly 标记", r.value.readOnly === true, JSON.stringify(r.value));
+  check("提示来自更新版本", typeof r.value.warning === "string" && r.value.warning.includes("更新版本"), r.value.warning);
+  check("原文件字节未改动", before === after);
+  // 只读保护：写端点必须拒绝，不能把 version 9 覆盖成空库
+  const wr = await call("save", { name: "新", content: "x" });
+  check("未来版本 save 被拒绝", wr.ok === false && wr.error && wr.error.code === "read-only", JSON.stringify(wr.error));
+  check("save 拒绝后原文件仍未动", (await readFile(FILE, "utf8")) === before);
+}
+
+// 2.9 迁移幂等：连跑两次不重复改写
+await reset({
+  version: 2,
+  snippets: [{ id: "m", name: "幂等", content: "c" }],
+});
+{
+  await call("list", {});
+  const s1 = await stat(FILE);
+  await new Promise((r) => setTimeout(r, 30));
+  await call("list", {});
+  const s2 = await stat(FILE);
+  check("第二次 list 不产生写入（幂等）", s1.mtimeMs === s2.mtimeMs, `${s1.mtimeMs} vs ${s2.mtimeMs}`);
+}
+
+// 2.10 迁移前备份的边界：已有备份不覆盖 / 无需迁移就不产生备份
+{
+  const hasBak = async () => (await readdir(DIR)).includes("snippets.json.pre-v3.bak");
+
+  // a) 已是**完整**的 v3（含全部字段）：不该凭空造备份
+  //    注意：手写的最小 v3 记录缺 revision/variables 等，会被当成待修复 → 合法地产生备份，
+  //    所以基线必须取一条真实保存后的规范输出。
+  await reset(null);
+  await call("save", { name: "基线", content: "hello" });
+  const canonical = await read();
+  check("基线是完整的 v3 记录", canonical.version === 3 && canonical.snippets[0].revision === 1, JSON.stringify(Object.keys(canonical.snippets[0])));
+  await reset(canonical);
+  await call("list", {});
+  check("无需迁移时不产生 pre-v3 备份", !(await hasBak()));
+
+  // b) 已有备份 + 再次从旧版本迁移：原备份字节必须一字不动
+  await reset({ version: 2, snippets: [{ id: "y", name: "二次", content: "c2" }] });
+  await writeFile(join(DIR, "snippets.json.pre-v3.bak"), "SENTINEL", "utf8");
+  await call("list", {});
+  const kept = await readFile(join(DIR, "snippets.json.pre-v3.bak"), "utf8");
+  check("已有 pre-v3 备份不被覆盖", kept === "SENTINEL", kept.slice(0, 20));
+
+  // c) 无文件（ENOENT 空库）：raw 是 undefined，不该造备份
+  await reset(null);
+  await call("list", {});
+  check("空库首次读取不产生 pre-v3 备份", !(await hasBak()));
+}
+
+// ══════════════ 3. 存储可靠性 ══════════════
+setGroup("3. 存储可靠性");
+
+// 3.1 损坏文件：rename 隔离，字节完全一致
+await reset("{ 这不是 JSON ");
+{
+  const original = await readFile(FILE, "utf8");
+  const r = await call("list", {});
+  const files = await readdir(DIR);
+  const corrupt = files.filter((f) => f.startsWith("snippets.corrupt-"));
+  check("损坏文件 list 仍成功", r.ok === true);
+  check("生成了 corrupt 备份", corrupt.length === 1, corrupt.join(","));
+  const saved = await readFile(join(DIR, corrupt[0]), "utf8");
+  check("备份与原文件逐字节相同", saved === original, `${saved.length} vs ${original.length}`);
+  check("主文件已被搬移（不存在）", !files.includes("snippets.json"), files.join(","));
+  check("返回里带提示", typeof r.value.warning === "string" && r.value.warning.length > 0, r.value.warning);
+}
+
+// 3.2 结构非法（snippets 不是数组）
+await reset(JSON.stringify({ version: 3, snippets: "不是数组" }));
+{
+  const r = await call("list", {});
+  const files = await readdir(DIR);
+  check("结构非法也自愈", r.ok === true && r.value.snippets.length === 0);
+  check("结构非法也搬移备份", files.some((f) => f.startsWith("snippets.corrupt-")));
+}
+
+// 3.3 .bak 轮换：第二次写入后 .bak = 第一次的内容
+await reset({ version: 3, snippets: [] });
+{
+  await call("save", { name: "第一", content: "c1" });
+  const first = await readFile(FILE, "utf8");
+  await call("save", { name: "第二", content: "c2" });
+  const bakExists = await stat(BAK).then(() => true).catch(() => false);
+  check("写入后存在 .bak", bakExists);
+  const bak = await readFile(BAK, "utf8");
+  check(".bak 内容是上一次成功写入的完整 JSON", bak === first, `bak=${bak.length} first=${first.length}`);
+  const bakParsed = JSON.parse(bak);
+  check(".bak 可解析且只含第一", bakParsed.snippets.length === 1 && bakParsed.snippets[0].name === "第一");
+}
+
+// 3.4 无临时文件残留
+{
+  const files = await readdir(DIR);
+  const tmp = files.filter((f) => f.endsWith(".tmp"));
+  check("无 .tmp 残留", tmp.length === 0, tmp.join(","));
+}
+
+// 3.5 corrupt 文件最多保留 5 份
+await reset(null);
+{
+  for (let i = 0; i < 8; i++) {
+    await writeFile(FILE, `{ 坏${i} `, "utf8");
+    await call("list", {});
+  }
+  const files = await readdir(DIR);
+  const corrupt = files.filter((f) => f.startsWith("snippets.corrupt-"));
+  check("corrupt 最多保留 5 份", corrupt.length <= 5, String(corrupt.length));
+}
+
+// 3.6 并发 50 条不丢
+await reset({ version: 3, snippets: [] });
+{
+  await Promise.all(
+    Array.from({ length: 50 }, (_, i) => call("save", { name: `并发${i}`, content: `内容${i}` }))
+  );
+  const store = await read();
+  check("并发 50 条全部落盘", store.snippets.length === 50, String(store.snippets.length));
+  check("无重名覆盖", new Set(store.snippets.map((s) => s.name)).size === 50);
+  check("id 全唯一", new Set(store.snippets.map((s) => s.id)).size === 50);
+}
+
+// ══════════════ 4. 双轨匹配 ══════════════
+setGroup("4. 双轨匹配");
+await reset({ version: 3, snippets: [] });
+{
+  const s1 = (await call("save", { name: "唯一", content: "c" })).value.snippet;
+  check("按名称删除唯一命中", (await call("delete", { ref: "唯一" })).ok === true);
+  check("按 #前缀恢复", (await call("restore", { ref: `#${s1.id.slice(0, 6)}` })).ok === true);
+
+  // 造重名：先建 3 个不同名，再直接改盘造同名（绕过 nameTaken）
+  const t = [];
+  for (const n of ["周报A", "周报B", "周报C"]) {
+    t.push((await call("save", { name: n, content: "c" })).value.snippet);
+  }
+  const store = await read();
+  for (const rec of store.snippets) {
+    if (rec.id === t[0].id || rec.id === t[1].id || rec.id === t[2].id) rec.name = "周报";
+  }
+  await reset(store);
+
+  const dup = await call("delete", { ref: "周报" });
+  check("重名删除报 conflict", dup.ok === false && dup.error.code === "conflict", dup.error?.code);
+  check("conflict 带 conflict=name", dup.error?.details?.conflict === "name", JSON.stringify(dup.error?.details));
+  check("conflict 文案列出候选", dup.error.message.includes("#"), dup.error?.message?.slice(0, 80));
+  const stillThere = await call("list", {});
+  check("重名时一条都没删", stillThere.value.snippets.filter((s) => s.name === "周报").length === 3);
+
+  const byPrefix = await call("delete", { ref: `#${t[1].id.slice(0, 6)}` });
+  check("按 #前缀可精确删除重名之一", byPrefix.ok === true, byPrefix.error?.message);
+
+  // 名称唯一性冲突
+  await reset({ version: 3, snippets: [] });
+  await call("save", { name: "占位名", content: "a" });
+  const other = (await call("save", { name: "另一个", content: "b" })).value.snippet;
+  const collide = await call("save", { id: other.id, name: "占位名", content: "c" });
+  check("改名撞名报 conflict", collide.ok === false && collide.error.code === "conflict", collide.error?.code);
+
+  // 已删除片段的名字可被复用
+  await reset({ version: 3, snippets: [] });
+  const d1 = (await call("save", { name: "可复用", content: "v1" })).value.snippet;
+  await call("delete", { id: d1.id });
+  const d2 = await call("save", { name: "可复用", content: "v2" });
+  check("已删除片段的名字可以复用", d2.ok === true && d2.created === true, `ok=${d2.ok} created=${d2.created} err=${d2.error?.message}`);
+
+  // 恢复时撞名
+  const r2 = await call("restore", { id: d1.id });
+  check("恢复时撞名报 conflict", r2.ok === false && r2.error.code === "conflict", r2.error?.code);
+  check("恢复撞名提示先改名", r2.error.message.includes("改名"), r2.error?.message);
+}
+
+// ══════════════ 5. revision 乐观锁 ══════════════
+setGroup("5. revision 乐观锁");
+await reset({ version: 3, snippets: [] });
+{
+  const s = (await call("save", { name: "锁", content: "v1" })).value.snippet;
+  check("新建 revision=1", s.revision === 1, String(s.revision));
+  const u1 = await call("save", { id: s.id, name: "锁", content: "v2", expectedRevision: 1 });
+  check("revision 匹配时更新成功", u1.ok === true);
+  check("更新后 revision=2", u1.value.snippet.revision === 2, String(u1.value.snippet.revision));  const u2 = await call("save", { id: s.id, name: "锁", content: "v3", expectedRevision: 1 });
+  check("revision 过期时报 conflict", u2.ok === false && u2.error.code === "conflict", u2.error?.code);
+  check("conflict 带 conflict=revision", u2.error?.details?.conflict === "revision");
+  check("conflict 返回当前 revision", u2.error?.details?.current?.revision === 2, String(u2.error?.details?.current?.revision));
+  const u3 = await call("save", { id: s.id, name: "锁", content: "v3", expectedRevision: 1, force: true });
+  check("force 跳过 revision 检查", u3.ok === true && u3.value.snippet.revision === 3, u3.error?.message);
+  const gone = await call("save", { id: "不存在", name: "x", content: "y" });
+  check("id 不存在报 not-found（不静默新建）", gone.ok === false && gone.error.code === "not-found", gone.error?.code);
+}
+
+// ══════════════ 6. 占位符 ══════════════
+setGroup("6. 占位符");
+await reset({ version: 3, snippets: [] });
+{
+  const cases = [
+    ["{{标题}}", ["标题"], "基本变量"],
+    ["\\{{标题}}", [], "反斜杠转义成字面量"],
+    ["\\\\{{标题}}", ["标题"], "双反斜杠 = 反斜杠 + 变量"],
+    ["{{}}", [], "空名不算变量"],
+    ["{{ }}", [], "空格名不算变量"],
+    ["{{{x}}}", ["x"], "三花括号 = { + 变量 + }"],
+    ["{{标题}}{{标题}}", ["标题"], "同名只记录一次"],
+    ["{{a}}{{b}}", ["a", "b"], "多个不同变量"],
+    ["中文{{中文变量}}结尾", ["中文变量"], "中文变量名"],
+    ["{{super-long-name_over-40}}", ["super-long-name_over-40"], "允许的字符集"],
+  ];
+  for (const [content, expect, label] of cases) {
+    const r = await call("save", { name: `ph-${label}`, content });
+    const vars = r.ok ? r.value.snippet.variables : {};
+    const keys = Object.keys(vars);
+    const ok = keys.length === expect.length && expect.every((e) => keys.includes(e));
+    check(`扫描：${label}`, ok, `期望 [${expect}] 实际 [${keys}]`);
+  }
+
+  // 保存时丢弃正文中不存在的变量键
+  const withGhost = await call("save", {
+    name: "幽灵键",
+    content: "只有 {{真实}}",
+    variables: { 真实: { required: true }, 幽灵: { default: "x" } },
+  });
+  check("保存时丢弃幽灵变量键", !("幽灵" in withGhost.value.snippet.variables), JSON.stringify(withGhost.value.snippet.variables));
+}
+
+// ══════════════ 7. optimize ══════════════
+setGroup("7. optimize");
+await reset({ version: 3, snippets: [] });
+{
+  fakeLlm.mode = "none";
+  const noLlm = await call("optimize", { content: "原提示词" });
+  check("无 llm 服务返回 unavailable", noLlm.ok === false && noLlm.error.code === "unavailable", noLlm.error?.code);
+
+  fakeLlm.mode = "ok";
+  const okr = await call("optimize", { content: "请审查 {{代码}}" });
+  check("正常优化返回 optimized", okr.ok === true && typeof okr.value.optimized === "string", okr.error?.message);
+  check("同时返回 original", okr.value?.original === "请审查 {{代码}}");
+  check("truncated=false", okr.value?.truncated === false);
+
+  fakeLlm.mode = "dropvar";
+  const dropped = await call("optimize", { content: "请审查 {{代码}}" });
+  check("优化结果丢失占位符时报错", dropped.ok === false && dropped.error.code === "internal", dropped.error?.code);
+  check("报错指出丢了哪个占位符", dropped.error.message.includes("{{代码}}"), dropped.error?.message);
+
+  fakeLlm.mode = "empty";
+  const empty = await call("optimize", { content: "x" });
+  check("优化结果为空时报错", empty.ok === false && empty.error.message.includes("为空"), empty.error?.message);
+
+  fakeLlm.mode = "throw";
+  const boom = await call("optimize", { content: "x" });
+  check("模型抛错时降级为 internal", boom.ok === false && boom.error.code === "internal", boom.error?.code);
+
+  fakeLlm.mode = "ok";
+  const bad = await call("optimize", { content: "   " });
+  check("空内容报 bad-request", bad.ok === false && bad.error.code === "bad-request", bad.error?.code);
+
+  // 按 id 优化
+  const s = (await call("save", { name: "按id优化", content: "请审查 {{代码}}" })).value.snippet;
+  const byId = await call("optimize", { id: s.id });
+  check("支持按 id 优化", byId.ok === true, byId.error?.message);
+}
+
+// ══════════════ 8. --cat 收口 ══════════════
+setGroup("8. --cat 收口");
+await reset({ version: 3, snippets: [] });
+{
+  const t1 = await cmd("add 报表 生成本周周报 --cat=写作");
+  check("行尾 --cat= 被识别", t1.kind === "success" && t1.text.includes("写作"), t1.text);
+  const s1 = (await call("list", {})).value.snippets.find((s) => s.name === "报表");
+  check("分类正确落库", s1?.category === "写作", s1?.category);
+  check("正文不含 --cat=", !s1?.content.includes("--cat"), s1?.content);
+
+  const t2 = await cmd("add 报表2 生成本周周报 --cat 写作");
+  const s2 = (await call("list", {})).value.snippets.find((s) => s.name === "报表2");
+  check("行尾 --cat 空格形式被识别", s2?.category === "写作", s2?.category);
+  check("正文干净", s2?.content === "生成本周周报", s2?.content);
+
+  // 正文中间的 --cat 原样保留（旧版会吞掉正文）
+  const t3 = await cmd("add 编译 运行 gcc -c main.c 看看报错");
+  const s3 = (await call("list", {})).value.snippets.find((s) => s.name === "编译");
+  check("正文中间的 -c 不被吞", s3?.content === "运行 gcc -c main.c 看看报错", s3?.content);
+  check("此时无分类", s3?.category === null, s3?.category);
+
+  const t4 = await cmd("add 说明 用法是 --cat 空格 分类");
+  const s4 = (await call("list", {})).value.snippets.find((s) => s.name === "说明");
+  check("正文里的 --cat 原样保留", s4?.content === "用法是 --cat 空格 分类", s4?.content);
+  check("并给出提示", t4.text.includes("按字面保留"), t4.text);
+
+  // -- 终止符
+  const t5 = await cmd("add 终止 结尾是 -- --cat");
+  const s5 = (await call("list", {})).value.snippets.find((s) => s.name === "终止");
+  check("-- 之后全按字面", s5?.content === "结尾是 --cat", s5?.content);
+
+  // 目录里最后一个 token 是 --cat 单独出现 → 显式清空分类
+  await cmd("add 清空 正文 --cat=旧类");
+  const t6 = await cmd("add 清空 正文 --cat");
+  const s6 = (await call("list", {})).value.snippets.find((s) => s.name === "清空");
+  check("裸 --cat 结尾 = 显式清空分类", s6?.category === null, s6?.category);
+}
+
+// ══════════════ 9. 命令族 ══════════════
+setGroup("9. 命令族");
+await reset({ version: 3, snippets: [] });
+{
+  const l0 = await cmd("");
+  check("空参数 → 引导语", l0.kind === "success" && l0.text.includes("还没有"), l0.text);
+  await cmd("add 甲 内容甲 --cat=类A");
+  await cmd("add 乙 内容{{变}}");
+  const l1 = await cmd("list");
+  check("list 列出 2 条", l1.text.includes("已保存 2 个片段"), l1.text);
+  check("list 标出分类", l1.text.includes("[类A]"), l1.text);
+  check("list 标出变量", l1.text.includes("{变}"), l1.text);
+
+  const sh = await cmd("show 甲");
+  check("show 输出正文", sh.kind === "success" && sh.text.includes("内容甲"), sh.text);
+  check("show 输出短 id", /#[0-9a-f]{6}/.test(sh.text), sh.text.slice(0, 20));
+
+  const mv = await cmd("mv 甲 丙");
+  check("mv 改名成功", mv.kind === "success" && mv.text.includes("丙"), mv.text);
+  const afterMv = (await call("list", {})).value.snippets;
+  check("改名后旧名消失", !afterMv.some((s) => s.name === "甲"));
+  check("改名后新名存在", afterMv.some((s) => s.name === "丙"));
+  check("改名保留分类", afterMv.find((s) => s.name === "丙")?.category === "类A");
+
+  const rm = await cmd("rm 丙");
+  check("rm 成功", rm.kind === "success" && rm.text.includes("已删除"), rm.text);
+  const un = await cmd("undo 丙");
+  check("undo 成功", un.kind === "success" && un.text.includes("已恢复"), un.text);
+
+  const bad = await cmd("nonsense");
+  check("未知子命令报错且给用法", bad.kind === "error" && bad.text.includes("用法"), bad.text);
+  const noName = await cmd("rm");
+  check("rm 缺参数给用法", noName.kind === "error" && noName.text.includes("用法"), noName.text);
+
+  // optimize 命令
+  fakeLlm.mode = "ok";
+  const opt = await cmd("optimize 乙");
+  check("optimize 命令成功", opt.kind === "success" && opt.text.includes("优化结果"), opt.text);
+  const optMissing = await cmd("optimize 不存在");
+  check("optimize 找不到时报错", optMissing.kind === "error", optMissing.text);
+}
+
+// ══════════════ 10. 导入导出 ══════════════
+setGroup("10. 导入导出");
+await reset({ version: 3, snippets: [] });
+{
+  await call("save", { name: "导出甲", category: "类A", content: "内容{{v}}" });
+  await call("save", { name: "导出乙", content: "纯文本" });
+
+  const ex = await call("export", {});
+  check("export 成功", ex.ok === true);
+  check("export 计数正确", ex.value.count === 2, String(ex.value.count));
+  const parsed = JSON.parse(ex.value.json);
+  check("导出格式标记", parsed.format === "dsh-prompt-snippets", parsed.format);
+  check("导出不含 id", !("id" in parsed.snippets[0]), JSON.stringify(parsed.snippets[0]));
+  check("导出不含 useCount", !("useCount" in parsed.snippets[0]));
+  check("导出含 variables", !!parsed.snippets.find((s) => s.name === "导出甲")?.variables);
+
+  // 按 ids 导出
+  const one = (await call("list", {})).value.snippets.find((s) => s.name === "导出乙");
+  const ex1 = await call("export", { ids: [one.id] });
+  check("按 ids 导出只含 1 条", ex1.value.count === 1, String(ex1.value.count));
+
+  // dryRun 导入
+  await reset({ version: 3, snippets: [] });
+  const dry = await call("import", { json: ex.value.json, mode: "merge", dryRun: true });
+  check("dryRun 返回 plan", dry.ok === true && dry.value.plan.added === 2, JSON.stringify(dry.value?.plan));
+  const afterDry = (await call("list", {})).value.snippets;
+  check("dryRun 不落盘", afterDry.length === 0, String(afterDry.length));
+
+  // 真导入 merge
+  const imp = await call("import", { json: ex.value.json, mode: "merge" });
+  check("import merge 成功", imp.ok === true, imp.error?.message);
+  check("新增 2 条", imp.value.plan.added === 2, JSON.stringify(imp.value.plan));
+  const imported = (await call("list", {})).value.snippets;
+  check("导入后库里有 2 条", imported.length === 2, String(imported.length));
+  check("导入保留 variables", Object.keys(imported.find((s) => s.name === "导出甲")?.variables || {}).includes("v"));
+
+  // 再次 merge 应跳过同名
+  const again = await call("import", { json: ex.value.json, mode: "merge" });
+  check("重复 merge 全部跳过", again.value.plan.skipped === 2 && again.value.plan.added === 0, JSON.stringify(again.value.plan));
+
+  // 坏 JSON
+  const bad = await call("import", { json: "{ 不是 JSON", mode: "merge" });
+  check("非法 JSON 报 bad-request", bad.ok === false && bad.error.code === "bad-request", bad.error?.code);
+  const noList = await call("import", { json: JSON.stringify({ foo: 1 }), mode: "merge" });
+  check("没有 snippets 数组报 bad-request", noList.ok === false, noList.error?.code);
+
+  // 裸数组也能导入
+  const arr = await call("import", { json: JSON.stringify([{ name: "裸数组", content: "c" }]), mode: "merge" });
+  check("接受裸数组", arr.ok === true && arr.value.plan.added === 1, arr.error?.message);
+}
+
+// ══════════════ 11. touch 批量 ══════════════
+setGroup("11. touch 批量");
+await reset({ version: 3, snippets: [] });
+{
+  const s = (await call("save", { name: "计数", content: "c" })).value.snippet;
+  const t1 = await call("touch", { ids: [s.id] });
+  check("touch 返回 ok", t1.ok === true);
+  const beforeFlush = (await read()).snippets.find((x) => x.id === s.id);
+  check("未落盘时磁盘 useCount 仍为 0（延迟写）", beforeFlush.useCount === 0, String(beforeFlush.useCount));
+
+  // 累计 20 次触发立即 flush
+  for (let i = 0; i < 20; i++) await call("touch", { ids: [s.id] });
+  await new Promise((r) => setTimeout(r, 60));
+  const after = (await read()).snippets.find((x) => x.id === s.id);
+  check("累计 20 次后落盘", after.useCount >= 20, String(after.useCount));
+  check("lastUsedAt 已写入", typeof after.lastUsedAt === "number" && after.lastUsedAt > 0, String(after.lastUsedAt));
+
+  const bad = await call("touch", { ids: "不是数组" });
+  check("ids 非数组时不报错", bad.ok === true);
+}
+
+// ══════════════ 12. 参数校验 ══════════════
+setGroup("12. 参数校验");
+await reset({ version: 3, snippets: [] });
+{
+  check("空名称被拒", (await call("save", { name: "", content: "x" })).error?.code === "bad-request");
+  check("超长名称被拒", (await call("save", { name: "x".repeat(200), content: "x" })).error?.code === "bad-request");
+  check("非字符串内容被拒", (await call("save", { name: "ok", content: 123 })).error?.code === "bad-request");
+  check("空 content 允许（非 null）", (await call("save", { name: "空正文", content: "" })).ok === true);
+  check("未知 endpoint 报 not-found", (await call("nope", {})).error?.code === "not-found");
+  const unknownMsg = (await call("nope", {})).error?.message;
+  check("未知 endpoint 提示重启", unknownMsg.includes("重启"), unknownMsg);
+  check("delete 缺 id/ref 报 bad-request", (await call("delete", {})).error?.code === "bad-request");
+  check("restore 缺 id/ref 报 bad-request", (await call("restore", {})).error?.code === "bad-request");
+  check("get 缺 id 报 bad-request", (await call("get", {})).error?.code === "bad-request");
+  check("get 不存在报 not-found", (await call("get", { id: "无" })).error?.code === "not-found");
+}
+
+// ══════════════ 13. 保留分类语义 ══════════════
+setGroup("13. 保留分类语义");
+await reset({ version: 3, snippets: [] });
+{
+  await call("save", { name: "保类", content: "c1", category: "原类" });
+  await call("save", { name: "保类", content: "c2" });
+  const keep = (await call("list", {})).value.snippets.find((s) => s.name === "保类");
+  check("不带 category 字段时保留原分类", keep.category === "原类" && keep.content === "c2", `${keep.category}/${keep.content}`);
+
+  await call("save", { name: "保类", content: "c3", category: "" });
+  const cleared = (await call("list", {})).value.snippets.find((s) => s.name === "保类");
+  check("显式空 category 清空分类", cleared.category === null, String(cleared.category));
+}
+
+// ══════════════ 输出 ══════════════
+console.log(results.join("\n"));
+const fails = results.filter((x) => x.startsWith("FAIL"));
+const passes = results.filter((x) => x.startsWith("PASS"));
+console.log(`\n${passes.length}/${passes.length + fails.length} passed`);
+if (fails.length) {
+  console.log("\n失败明细：\n" + fails.join("\n"));
+  process.exitCode = 1;
+}

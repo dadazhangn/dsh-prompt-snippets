@@ -1,0 +1,35 @@
+name: CI
+
+# 每次 push / 发 tag / 提 PR 时跑测试套件。
+# 测试用 isolate-home 把 DSH_HOME 顶到临时目录，绝不读写真实片段库。
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 语法检查（host 半 + client 半）
+        run: |
+          node --check index.js
+          node --check client.js
+
+      - name: 测试套件
+        run: |
+          set -e
+          node test/v110-host-test.mjs
+          node test/optimize-test.mjs
+          node test/io-test.mjs
+          node test/client-test.mjs
+          node test/client-error-test.mjs
