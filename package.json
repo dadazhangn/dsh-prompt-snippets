@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-snippets",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "Save reusable prompt snippets with categories and {{placeholders}}, insert them into the composer from a draggable dock, and refine them with the default model.",
   "keywords": [

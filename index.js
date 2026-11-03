@@ -12,6 +12,8 @@ const MAX_NAME = 120;
 const MAX_CONTENT = 200_000;
 const MAX_VARIABLES = 64;
 const CORRUPT_KEEP = 5;
+// 导入 JSON 大小上限（UTF-8 字节）：防内存被打爆，也让恶意/损坏文件止步。
+const MAX_IMPORT_BYTES = 8_000_000;
 
 /** 本 host 半支持的全部 RPC 端点。client 半用 capabilities 握手校验。 */
 const ENDPOINTS = [
@@ -36,6 +38,11 @@ function resolveHome() {
 
 function dataPath(...segments) {
   return join(resolveHome(), "data", "prompt-snippets", ...segments);
+}
+
+/** 字符串 UTF-8 字节数。 */
+function byteLength(text) {
+  return Buffer.byteLength(text, "utf8");
 }
 
 /**
@@ -357,7 +364,7 @@ async function readStore() {
     raw = await readFile(dataPath("snippets.json"), "utf8");
   } catch (error) {
     if (error && error.code === "ENOENT") {
-      return { store: emptyStore(), warnings: [], migrated: false };
+      return { store: emptyStore(), warnings: [], migrated: false, readOnly: false };
     }
     // EACCES / EIO 等：不隔离，避免把权限问题误判成损坏
     throw error;
@@ -368,12 +375,15 @@ async function readStore() {
     parsed = JSON.parse(raw);
   } catch (_) {
     const moved = await quarantine();
+    // 隔离成功 = 原文件已原子搬走，可以继续写（空库）；隔离失败 = 原文件还在但内容
+    // 损坏，此时写会覆盖原始现场 → 进入只读保护，宁可停写也不丢证据。
     return {
       store: emptyStore(),
       warnings: [
         `片段文件不是合法 JSON${moved ? `，已原样搬移为 ${moved}` : "，搬移备份失败"}，当前以空库继续运行。`,
       ],
       migrated: false,
+      readOnly: moved === null,
     };
   }
 
@@ -385,6 +395,7 @@ async function readStore() {
         `片段文件结构不可识别${moved ? `，已原样搬移为 ${moved}` : "，搬移备份失败"}，当前以空库继续运行。`,
       ],
       migrated: false,
+      readOnly: moved === null,
     };
   }
 
@@ -396,6 +407,7 @@ async function readStore() {
         `片段文件来自更新版本（version ${parsed.version} > ${STORE_VERSION}），已只读跳过加载，原文件未被修改。`,
       ],
       migrated: false,
+      readOnly: true,
     };
   }
 
@@ -405,7 +417,7 @@ async function readStore() {
   if (stats.dupIds > 0) warnings.push(`修复了 ${stats.dupIds} 条重复 id。`);
   const migrated = stats.repaired > 0 || stats.filled > 0 || parsed.version !== STORE_VERSION;
   // raw 交回调用方：真正要落盘改文件之前，先用它做迁移前备份
-  return { store, warnings, migrated, raw };
+  return { store, warnings, migrated, raw, readOnly: false };
 }
 
 /**
@@ -473,9 +485,19 @@ async function persist(store) {
     if (fh) await fh.close().catch(() => {});
   }
 
-  // 轮换 .bak：失败不阻断主写入
+  // 轮换 .bak：先写临时文件 + fsync，再 rename 原子替换，避免 copyFile 断电留半截。
+  // 失败不阻断主写入。
   try {
-    await copyFile(final, bak);
+    const bakTmp = dataPath(`snippets.json.bak.${process.pid}.${Date.now()}.tmp`);
+    await copyFile(final, bakTmp);
+    let bfh = null;
+    try {
+      bfh = await open(bakTmp, "r+");
+      await bfh.sync();
+    } finally {
+      if (bfh) await bfh.close().catch(() => {});
+    }
+    await rename(bakTmp, bak);
   } catch (error) {
     if (!error || error.code !== "ENOENT") {
       /* 备份失败仅降级，不抛 */
@@ -504,8 +526,9 @@ function withLock(task) {
   return run;
 }
 
-function view(store, warnings) {
+function view(store, warnings, readOnly) {
   const value = { version: store.version, snippets: alive(store) };
+  if (readOnly) value.readOnly = true;
   if (warnings && warnings.length > 0) value.warning = warnings.join("\n");
   return { ok: true, value };
 }
@@ -516,7 +539,18 @@ function view(store, warnings) {
  */
 async function transact(mutator) {
   return withLock(async () => {
-    const { store, warnings, migrated, raw } = await readStore();
+    const { store, warnings, migrated, raw, readOnly } = await readStore();
+    // 只读保护：数据文件来自更新版本或隔离失败。任何写端点都要拒绝，
+    // 否则 persist 会把 version 99 / 损坏现场覆盖成空库。
+    if (readOnly) {
+      return {
+        ok: false,
+        error: {
+          code: "read-only",
+          message: warnings[0] || "片段库处于只读状态，已拒绝写入。",
+        },
+      };
+    }
     if (migrated) {
       if (raw !== undefined) await backupBeforeMigrate(raw);
       await persist(store);
@@ -533,12 +567,12 @@ async function transact(mutator) {
 /** 持锁读 → 需要迁移就先备份再落盘。读类端点与命令都走这里，保证迁移只发生一次。 */
 async function readAndMigrate() {
   return withLock(async () => {
-    const { store, warnings, migrated, raw } = await readStore();
+    const { store, warnings, migrated, raw, readOnly } = await readStore();
     if (migrated) {
       if (raw !== undefined) await backupBeforeMigrate(raw);
       await persist(store);
     }
-    return { store, warnings };
+    return { store, warnings, readOnly };
   });
 }
 
@@ -567,10 +601,14 @@ const OPTIMIZE_SYSTEM = [
   "4. 直接输出优化后的提示词正文，不要任何解释、前言、客套话，也不要包裹在 markdown 代码块里。",
 ].join("\n");
 
-async function optimize(ctx, content, signal) {
+/**
+ * 模型可用性探测。capabilities 与 optimize 共用同一判定，
+ * 面板才能提前把 ✨ 置灰，而不是等用户点了才报错。
+ */
+function optimizeAvailability(ctx) {
   const llm = ctx.get("llm");
+  if (!llm) return { available: false, reason: "当前环境没有可用的模型服务", provider: null, model: null };
   const defaultModel = ctx.get("agentDefaultModel");
-  if (!llm) return fail("unavailable", "当前环境没有可用的模型服务");
   let provider;
   let model;
   if (defaultModel) {
@@ -582,7 +620,18 @@ async function optimize(ctx, content, signal) {
       /* 读取失败则退回未配置 */
     }
   }
-  if (!provider || !model) return fail("unavailable", "未配置默认模型，无法优化");
+  if (!provider || !model) {
+    return { available: false, reason: "未配置默认模型，无法优化", provider: null, model: null };
+  }
+  return { available: true, reason: null, provider, model };
+}
+
+async function optimize(ctx, content, signal) {
+  const avail = optimizeAvailability(ctx);
+  if (!avail.available) return fail("unavailable", avail.reason);
+  const llm = ctx.get("llm");
+  const provider = avail.provider;
+  const model = avail.model;
 
   let text = "";
   try {
@@ -941,6 +990,9 @@ function parseImport(raw) {
 
   const out = [];
   let dropped = 0;
+  // 同文件内按名称去重：同名片段只保留最后一条（后者覆盖前者），
+  // 否则「A,A」会生成两条同名记录，之后按名称匹配就变成歧义。
+  const seen = new Set();
   for (const item of list) {
     if (!item || typeof item !== "object") {
       dropped++;
@@ -953,47 +1005,71 @@ function parseImport(raw) {
     }
     const { names } = scanPlaceholders(item.content);
     const { variables } = normalizeVariables(names, item.variables);
-    out.push({
+    const record = {
       name: nm,
       category: typeof item.category === "string" && item.category.trim() ? item.category.trim() : null,
       content: item.content,
       variables,
-    });
+    };
+    // 后者覆盖前者：从 out 里拿掉旧的那条，同名的进不了「seen 已处理」的陷阱
+    if (seen.has(nm)) {
+      const idx = out.findIndex((r) => r.name === nm);
+      if (idx >= 0) out.splice(idx, 1);
+      dropped++;
+    }
+    seen.add(nm);
+    out.push(record);
   }
   return { snippets: out, dropped };
 }
 
 async function importSnippets(payload) {
+  const rawBytes = typeof payload?.rawBytes === "number" && payload.rawBytes >= 0
+    ? payload.rawBytes
+    : payload?.json != null
+    ? byteLength(payload.json)
+    : 0;
+  if (rawBytes > MAX_IMPORT_BYTES) {
+    return fail("bad-request", `导入内容过大（${rawBytes} 字节，上限 ${MAX_IMPORT_BYTES} 字节）`);
+  }
   const parsed = parseImport(payload?.json);
   if (parsed.error) return fail("bad-request", parsed.error);
   const mode = payload?.mode === "replace" ? "replace" : "merge";
   const dryRun = payload?.dryRun === true;
 
   return transact((store) => {
-    const plan = { added: 0, updated: 0, skipped: 0, conflicts: [], dropped: parsed.dropped || 0 };
+    const plan = { added: 0, updated: 0, skipped: 0, deleted: 0, conflicts: [], dropped: parsed.dropped || 0 };
     const now = Date.now();
-    const base = mode === "replace" ? [] : alive(store);
+    // merge：只在活跃片段里按名称匹配，命中即跳过（不覆盖）。
+    // replace：以名称为锚复用现有记录（含已软删除的），命中即覆盖并复活；
+    //          未命中的活跃片段在末尾统一软删除——保留垃圾桶，误操作还能 restore。
+    //          复用记录而不是「全删再新建」是为了让 id 稳定、revision 连续递增，
+    //          外部（如面板草稿的 expectedRevision）不会因为一次导入而集体失效。
+    const pool = mode === "replace" ? store.snippets.slice() : alive(store);
+    const matched = new Set();
 
     for (const item of parsed.snippets) {
-      const exist = base.find((s) => s.name === item.name) ?? null;
+      const exist = pool.find((s) => s.name === item.name && !matched.has(s.id)) ?? null;
       if (exist) {
         if (mode === "merge") {
           plan.skipped++;
           plan.conflicts.push({ name: item.name, reason: "name" });
           continue;
         }
+        matched.add(exist.id);
         plan.updated++;
         if (!dryRun) {
           exist.content = item.content;
           exist.variables = item.variables;
           exist.category = item.category;
           exist.updatedAt = now;
+          if (exist.deletedAt !== null && exist.deletedAt !== undefined) exist.deletedAt = null;
           exist.revision += 1;
         }
       } else {
         plan.added++;
         if (!dryRun) {
-          store.snippets.push({
+          const fresh = {
             id: randomUUID(),
             name: item.name,
             category: item.category,
@@ -1005,13 +1081,35 @@ async function importSnippets(payload) {
             deletedAt: null,
             useCount: 0,
             lastUsedAt: null,
-          });
+          };
+          store.snippets.push(fresh);
+          matched.add(fresh.id);
         }
       }
     }
 
+    // replace 收尾：这一批里没出现过的活跃片段全部软删除。
+    // dry-run 也要算 deleted 数，但不动数据，让用户预演时就知道会清掉几条。
+    if (mode === "replace") {
+      let deleted = 0;
+      for (const s of store.snippets) {
+        if (matched.has(s.id)) continue;
+        if (s.deletedAt !== null && s.deletedAt !== undefined) continue;
+        deleted++;
+        if (!dryRun) {
+          s.deletedAt = now;
+          s.updatedAt = now;
+          s.revision += 1;
+        }
+      }
+      plan.deleted = deleted;
+    }
+
     if (dryRun) {
       return { ok: true, changed: false, value: { plan, dryRun: true, ...view(store).value } };
+    }
+    if (plan.added === 0 && plan.updated === 0 && plan.skipped === 0 && plan.deleted === 0) {
+      return { ok: true, changed: false, value: { plan, ...view(store).value } };
     }
     return { ok: true, changed: true, value: { plan, ...view(store).value } };
   });
@@ -1081,7 +1179,8 @@ function parseAddArgs(rest) {
 
 async function dispatch(ctx, endpoint, payload, signal) {
   switch (endpoint) {
-    case "capabilities":
+    case "capabilities": {
+      const avail = optimizeAvailability(ctx);
       return {
         ok: true,
         value: {
@@ -1089,21 +1188,27 @@ async function dispatch(ctx, endpoint, payload, signal) {
           storeVersion: STORE_VERSION,
           endpoints: ENDPOINTS,
           channel: CHANNEL,
+          // 面板据此提前把 ✨ 置灰，并把 reason 挂到 title 上
+          optimize: { available: avail.available, reason: avail.reason },
         },
       };
+    }
 
     case "list": {
-      const { store, warnings } = await readAndMigrate();
-      return view(store, warnings);
+      const { store, warnings, readOnly } = await readAndMigrate();
+      return view(store, warnings, readOnly);
     }
 
     case "get": {
       const id = typeof payload?.id === "string" ? payload.id : "";
       if (!id) return fail("bad-request", "需要提供 id");
-      const { store, warnings } = await readAndMigrate();
+      const { store, warnings, readOnly } = await readAndMigrate();
       const found = store.snippets.find((s) => s.id === id) ?? null;
       if (!found) return fail("not-found", "未找到该片段");
-      return { ok: true, value: { snippet: found, warning: warnings.join("\n") || undefined } };
+      return {
+        ok: true,
+        value: { snippet: found, readOnly: readOnly || undefined, warning: warnings.join("\n") || undefined },
+      };
     }
 
     case "save":
@@ -1133,18 +1238,65 @@ async function dispatch(ctx, endpoint, payload, signal) {
     case "export": {
       const { store, warnings } = await readAndMigrate();
       const device = buildExport(store, payload?.ids);
+      const json = JSON.stringify(device, null, 2);
+      // payload.write = 文件名（字符串）时，落盘到数据目录的 exports/ 并回传路径。
+      // 面板没有文件选择器，走这条路把文件实实在在交到用户手上。
+      if (typeof payload?.write === "string") {
+        const fileName = safeExportName(payload.write);
+        if (fileName === null) return fail("bad-request", "导出文件名不合法");
+        const target = dataPath("exports", fileName);
+        try {
+          await mkdir(dataPath("exports"), { recursive: true });
+          await writeFile(target, json, { encoding: "utf8", flag: "w" });
+        } catch (error) {
+          return fail("internal", `写入导出文件失败：${error instanceof Error ? error.message : String(error)}`);
+        }
+        return {
+          ok: true,
+          value: { json, count: device.snippets.length, path: target, warning: warnings.join("\n") || undefined },
+        };
+      }
       return {
         ok: true,
         value: {
-          json: JSON.stringify(device, null, 2),
+          json,
           count: device.snippets.length,
           warning: warnings.join("\n") || undefined,
         },
       };
     }
 
-    case "import":
-      return importSnippets(payload);
+    case "import": {
+      // 两种入口：
+      //   payload.json = 已读到的文本（命令侧读完再传）
+      //   payload.path = 文件路径（面板侧拿不到文件系统，交给 host 读）
+      // path 省略 exports/ 前缀与 .json 后缀时回落到数据目录的 exports/。
+      let raw = payload?.json;
+      let usedPath = null;
+      if (typeof payload?.path === "string" && payload.path.trim() !== "") {
+        const target = payload.path.trim();
+        usedPath = target;
+        try {
+          raw = await readFile(target, "utf8");
+        } catch (_) {
+          const guess = dataPath("exports", target.toLowerCase().endsWith(".json") ? target : `${target}.json`);
+          try {
+            raw = await readFile(guess, "utf8");
+            usedPath = guess;
+          } catch (error) {
+            return fail(
+              "bad-request",
+              `读不到导入文件「${target}」：${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+      }
+      const result = await importSnippets({ ...payload, json: raw, rawBytes: raw !== undefined ? byteLength(raw) : 0 });
+      if (result.ok && usedPath) {
+        return { ok: true, value: { ...result.value, path: usedPath } };
+      }
+      return result;
+    }
 
     default:
       return fail(
@@ -1155,7 +1307,18 @@ async function dispatch(ctx, endpoint, payload, signal) {
 }
 
 const ADD_USAGE = "/snippet add <名称> <内容> [--cat=<分类>]";
-const USAGE = `${ADD_USAGE} | list | show <名称> | rm <名称|#id> | undo <名称|#id> | mv <名称> <新名称> | optimize <名称>`;
+const USAGE = `${ADD_USAGE} | list | show <名称> | rm <名称|#id> | undo <名称|#id> | mv <名称> <新名称> | optimize <名称> | export [文件名] | import <文件路径> [--replace] [--dry]`;
+
+/** 导出文件名不能带路径分隔符，也不能是 `.`/`..`，避免写出数据目录。 */
+function safeExportName(raw) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  const base = text === "" ? "snippets" : text;
+  if (base.includes("/") || base.includes("\\") || base === "." || base === "..") return null;
+  const withExt = base.toLowerCase().endsWith(".json") ? base : `${base}.json`;
+  // 只留安全字符，避免 Windows 保留名/控制字符
+  if (!/^[^<>:"|?*\u0000-\u001f]{1,80}$/u.test(withExt)) return null;
+  return withExt;
+}
 
 export function apply(ctx) {
   // 不能用 ctx.connection.rpc.handle()：它内部用 connection 插件自己的 fiber
@@ -1183,9 +1346,9 @@ export function apply(ctx) {
 
   ctx.commands.register({
     name: "snippet",
-    description: "管理提示词片段：保存、列出、查看、删除、恢复、改名、AI 优化",
+    description: "管理提示词片段：保存、列出、查看、删除、恢复、改名、AI 优化、导入导出",
     input: {
-      hint: "add <名称> <内容> [--cat=<分类>] | list | show <名称> | rm <名称> | undo <名称> | mv <名称> <新名> | optimize <名称>",
+      hint: "add <名称> <内容> [--cat=<分类>] | list | show <名称> | rm <名称> | undo <名称> | mv <名称> <新名> | optimize <名称> | export [文件名] | import <文件> [--replace] [--dry]",
     },
     async handler({ rawInput, signal }) {
       const args = (rawInput ?? "").trim();
@@ -1337,6 +1500,49 @@ export function apply(ctx) {
             kind: "success",
             text: `「${found.snippet.name}」优化结果：\n\n${result.value.optimized}`,
           };
+        }
+
+        case "export": {
+          const fileName = safeExportName(rest.join(" "));
+          if (fileName === null) return { kind: "error", text: "导出文件名不合法（不能含路径分隔符或 Windows 保留字符）。" };
+          const result = await dispatch(ctx, "export", { write: fileName }, signal);
+          if (!result.ok) return { kind: "error", text: result.error.message };
+          const warn = result.value.warning ? `\n⚠ ${result.value.warning}` : "";
+          return {
+            kind: "success",
+            text: `已导出 ${result.value.count} 个片段到：\n${result.value.path}${warn}\n\n用 /snippet import ${fileName} 可在别的机器导入。`,
+          };
+        }
+
+        case "import": {
+          const tokens = rest.filter((t) => !t.startsWith("--"));
+          const replace = rest.includes("--replace");
+          const dryRun = rest.includes("--dry");
+          const target = tokens.join(" ").trim();
+          if (!target) return { kind: "error", text: "用法：/snippet import <文件路径> [--replace] [--dry]" };
+          const result = await dispatch(
+            ctx,
+            "import",
+            { path: target, mode: replace ? "replace" : "merge", dryRun },
+            signal
+          );
+          if (!result.ok) return { kind: "error", text: result.error.message };
+          const p = result.value.plan;
+          const lines = [
+            `${dryRun ? "预演（未写入）" : "导入完成"}（${replace ? "替换模式" : "合并模式"}）：`,
+            `来源：${result.value.path}`,
+            `新增 ${p.added}，更新 ${p.updated}，跳过 ${p.skipped}，丢弃 ${p.dropped}`,
+          ];
+          if (replace && (p.deleted > 0 || dryRun)) {
+            lines.push(dryRun ? `将移入垃圾桶 ${p.deleted} 条` : `移入垃圾桶 ${p.deleted} 条（可 /snippet undo 恢复）`);
+          }
+          if (p.conflicts.length > 0) {
+            const names = p.conflicts.slice(0, 10).map((c) => c.name).join("、");
+            const more = p.conflicts.length > 10 ? ` 等 ${p.conflicts.length} 个` : "";
+            lines.push(`同名跳过：${names}${more}`);
+          }
+          if (dryRun) lines.push("确认无误后去掉 --dry 再执行一次。");
+          return { kind: "success", text: lines.join("\n") };
         }
 
         default:
