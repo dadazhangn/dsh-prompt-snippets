@@ -1,5 +1,7 @@
 # 提示词片段库（Prompt Snippets）
 
+[![CI](https://github.com/dadazhangn/dsh-prompt-snippets/actions/workflows/ci.yml/badge.svg)](https://github.com/dadazhangn/dsh-prompt-snippets/actions/workflows/ci.yml)
+
 保存并一键插入可复用的提示词片段，支持分类与 `{{占位符}}`。
 
 一个让「常用提示词」随手可得、不重复造轮子的 DSH 插件。片段数据保存在本机
@@ -163,6 +165,8 @@ cordis.patch.yml    插入 host 半的 loader patch
 locale/{en,zh}.json 市场显示名与描述
 icon.svg            图标
 LICENSE             MIT
+test/               测试套件（随仓库分发，不进 npm 包）
+.github/workflows   GitHub Actions 自动验证
 ```
 
 ## 兼容性
@@ -173,7 +177,7 @@ LICENSE             MIT
 
 ## 测试
 
-仓库外的工作区里有一组自测脚本（不随包发布），当前覆盖 **417 条断言**：
+仓库 `test/` 目录里有一组自测脚本（随仓库分发，不进 npm 包），当前覆盖 **417 条断言**：
 
 | 套件 | 覆盖 |
 |---|---|
@@ -184,3 +188,10 @@ LICENSE             MIT
 | `client-error-test.mjs` | 插入失败的报错链路（6） |
 
 测试通过 `isolate-home.mjs` 把 `DSH_HOME` 顶到系统临时目录，**绝不读写真实片段库**。
+
+每次 push、发 tag（`v*`）、提 PR 时，GitHub Actions 会自动跑「语法检查 + 这 5 个套件」（见
+`.github/workflows/ci.yml`），任何一步失败都会在 PR 上打红叉阻止合并。本地运行：
+
+```bash
+npm test
+```
