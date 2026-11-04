@@ -334,6 +334,12 @@ window.__ModuleLoader__.load({
         maxHeight: "120px",
         overflow: "auto",
       },
+      historyLink: {
+        color: "var(--dsw-alias-brand-primary)",
+        cursor: "pointer",
+        textDecoration: "underline",
+        textUnderlineOffset: "2px",
+      },
       // ── v1.3 命令面板（全局快捷唤起 overlay） ──
       paletteOverlay: {
         position: "fixed",
@@ -366,7 +372,7 @@ window.__ModuleLoader__.load({
         outline: "none",
         fontFamily: "inherit",
       },
-      paletteList: { overflowY: "auto", padding: "6px", flex: 1 },
+      paletteList: { overflowY: "auto", padding: "6px", flex: 1, minHeight: 0 },
       paletteRow: {
         display: "flex",
         alignItems: "center",
@@ -750,12 +756,12 @@ window.__ModuleLoader__.load({
       return [...groups.entries()];
     }
 
-    /** 大小写不敏感、命中名称/分类/内容任一处。 */
+    /** 大小写不敏感、命中名称/分类/标签/内容任一处。 */
     function filterSnippets(snippets, query) {
       const q = query.trim().toLowerCase();
       if (!q) return snippets;
       return snippets.filter((s) => {
-        const hay = `${s.name}\n${s.category || ""}\n${s.content}`.toLowerCase();
+        const hay = `${s.name}\n${s.category || ""}\n${(s.tags || []).join(" ")}\n${s.content}`.toLowerCase();
         return hay.includes(q);
       });
     }
@@ -984,6 +990,7 @@ window.__ModuleLoader__.load({
       const [paletteQuery, setPaletteQuery] = useState("");
       const [paletteSelected, setPaletteSelected] = useState(-1);
       const paletteInputRef = useRef(null);
+      const paletteListRef = useRef(null);
       const searchRef = useRef(null);
       const nameRef = useRef(null);
       // 面板 DOM 引用：拖拽/缩放期间直接改 style.left/top/width/height，
@@ -1034,11 +1041,13 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         const onKey = (e) => {
-          if (e.key === "k" && e.ctrlKey && e.shiftKey) {
+          // 用 e.code（物理键位）而非 e.key：Shift+K 会让 e.key 变成大写 "K"，
+          // 导致 Ctrl+Shift+K 永远匹配不到小写 "k"。
+          if (e.code === "KeyK" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
             e.preventDefault();
             setPaletteOpen(true);
             setOpen(false);
-          } else if (e.key === "p" && e.ctrlKey && e.shiftKey) {
+          } else if (e.code === "KeyP" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
             e.preventDefault();
             setPaletteOpen(true);
             setOpen(false);
@@ -1061,6 +1070,22 @@ window.__ModuleLoader__.load({
         return sorted.slice(0, 30);
       }, [snippets, paletteQuery]);
 
+      // 选中项变化时，把对应的列表行滚进可视区（否则上下键切换超过可视高度后不跟随）。
+      useEffect(() => {
+        if (!paletteOpen || paletteSelected < 0 || !paletteListRef.current) return;
+        const el = paletteListRef.current;
+        const row = el.querySelector(`[data-ps-index="${paletteSelected}"]`);
+        if (!row) return;
+        const elTop = el.getBoundingClientRect().top;
+        const rowTop = row.getBoundingClientRect().top;
+        const rowBottom = row.getBoundingClientRect().bottom;
+        if (rowTop < elTop) {
+          el.scrollTop += rowTop - elTop;
+        } else if (rowBottom > el.getBoundingClientRect().bottom) {
+          el.scrollTop += rowBottom - el.getBoundingClientRect().bottom;
+        }
+      }, [paletteOpen, paletteSelected]);
+
       const openPalette = () => {
         setPaletteQuery("");
         setPaletteSelected(-1);
@@ -1074,9 +1099,9 @@ window.__ModuleLoader__.load({
         setPaletteSelected(-1);
       };
 
-      const paletteChoose = (snippet) => {
+      const paletteChoose = (snippet, sendAfter = false) => {
         closePalette();
-        insert(snippet);
+        insert(snippet, sendAfter);
       };
 
       // §3.1：启动时问一次模型可用性。拿不到就不降级为「假装可用」——
@@ -1295,12 +1320,32 @@ window.__ModuleLoader__.load({
         Promise.resolve(rpc.call(CHANNEL, "touch", { ids: [snippetId] })).catch(() => {});
       };
 
+      // 发送当前草稿（Ctrl+Enter 插入并发送时调用；失败不打断，交给用户手动补救）。
+      const submitDraft = () => {
+        try {
+          inputActions.submit();
+        } catch (_) {
+          setError("发送失败：请确认输入框里有内容再试。");
+        }
+      };
+
       // ────────── 插入：直插 / 按默认值插 / 弹表单 ──────────
-      const insert = (snippet) => {
+      // sendAfter：插入成功后立即发送草稿。带必填占位符的片段仍需先填表单，
+      // 无法自动发送，此时降级为「弹表单、填完手动发送」。
+      const insert = (snippet, sendAfter = false) => {
         const plan = fillPlan(snippet);
         if (plan.kind === "form") {
           setFilling({ snippet, values: {} });
           setError(null);
+          // 从命令面板（palette）触发时主面板是关闭的，表单渲染在 open 面板内部，
+          // 必须同时打开主面板并定位，否则「按回车后表单被吞」。
+          if (!open) {
+            if (!panelPos) {
+              const saved = loadSavedPos();
+              setPanelPos(saved ? clampPos(saved.left, saved.top, panelSize) : clampPos(GAP, GAP, panelSize));
+            }
+            setOpen(true);
+          }
           return;
         }
         const { tokens } = scanPlaceholders(snippet.content);
@@ -1312,7 +1357,11 @@ window.__ModuleLoader__.load({
         touch(snippet.id);
         setError(null);
         setOpen(false);
-        if (plan.kind === "defaults") setNotice("已用默认值填充，可在 ✏️ 里改");
+        if (sendAfter) {
+          submitDraft();
+        } else if (plan.kind === "defaults") {
+          setNotice("已用默认值填充，可在 ✏️ 里改");
+        }
       };
 
       const setFillValue = (name, value) => {
@@ -1988,6 +2037,10 @@ window.__ModuleLoader__.load({
             const opts = Array.isArray(d.options) ? d.options : [];
             const label = (typeof d.label === "string" && d.label ? d.label : nm) + (required ? " · 必填" : "");
             const val = typeof cur.values[nm] === "string" ? cur.values[nm] : "";
+            // 长文本变量（变量名带「代码/原文/记录/要点/说明/内容/text/body」或已含换行）用 textarea，
+            // 单行 input 会吃掉换行，粘贴多行代码/会议记录没法看。
+            const multiline =
+              /代码|code|原文|记录|要点|说明|内容|text|body/i.test(nm) || (typeof val === "string" && val.includes("\n"));
             return h(
               "label",
               { key: nm, style: style.field },
@@ -2005,6 +2058,14 @@ window.__ModuleLoader__.load({
                     !required ? h("option", { value: "" }, "（不填）") : null,
                     opts.map((o) => h("option", { key: o, value: o }, o))
                   )
+                : multiline
+                ? h("textarea", {
+                    className: "ps-textarea",
+                    style: { ...style.textarea, minHeight: "54px" },
+                    value: val,
+                    placeholder: typeof d.default === "string" ? d.default : "",
+                    onChange: (ev) => setFillValue(nm, ev.target.value),
+                  })
                 : h("input", {
                     type: "text",
                     className: "ps-input",
@@ -2251,7 +2312,7 @@ window.__ModuleLoader__.load({
               {
                 type: "button",
                 className: "ps-icon",
-                style: { ...style.icon, ...style.iconBusy },
+                style: history && history.id === s.id ? { ...style.icon, ...style.itemEditing } : style.icon,
                 onClick: () => showHistory(s),
                 title: "查看历史版本",
                 "aria-label": `历史「${s.name}」`,
@@ -2357,7 +2418,8 @@ window.__ModuleLoader__.load({
                 } else if (e.key === "Enter") {
                   e.preventDefault();
                   const pick = paletteSelected >= 0 ? paletteResults[paletteSelected] : paletteResults[0];
-                  if (pick) paletteChoose(pick);
+                  // Enter 插入；Ctrl+Enter / Meta+Enter 插入并立即发送。
+                  if (pick) paletteChoose(pick, e.ctrlKey || e.metaKey);
                 } else if (e.key === "Escape") {
                   e.preventDefault();
                   closePalette();
@@ -2366,7 +2428,7 @@ window.__ModuleLoader__.load({
             }),
             h(
               "div",
-              { style: style.paletteList },
+              { style: style.paletteList, ref: paletteListRef },
               paletteResults.length === 0
                 ? h("div", { style: style.empty }, snippets.length === 0 ? "还没有片段，点 dock 的「＋ 新建」保存一个。" : `没有匹配「${paletteQuery}」的片段。`)
                 : paletteResults.map((s, i) =>
@@ -2376,6 +2438,7 @@ window.__ModuleLoader__.load({
                         key: s.id,
                         type: "button",
                         className: "ps-item",
+                        "data-ps-index": i,
                         style: i === paletteSelected ? style.paletteRowActive : style.paletteRow,
                         onMouseEnter: () => setPaletteSelected(i),
                         onClick: () => paletteChoose(s),
@@ -2393,7 +2456,7 @@ window.__ModuleLoader__.load({
             h(
               "div",
               { style: style.paletteHint },
-              "↑↓ 选择 · Enter 插入 · Esc 关闭 · Ctrl+Shift+K 唤起"
+              "↑↓ 选择 · Enter 插入 · Ctrl+Enter 插入并发送 · Esc 关闭 · Ctrl+Shift+K 唤起"
             )
           )
         );
@@ -2421,7 +2484,40 @@ window.__ModuleLoader__.load({
                     h(
                       "div",
                       { style: style.historyContent },
-                      h("div", { style: { color: C.textDim, fontSize: "10px" } }, `保存于 ${fmtTime(v.at)} · 插入旧版`),
+                      h(
+                        "div",
+                        { style: { color: C.textDim, fontSize: "10px" } },
+                        `保存于 ${fmtTime(v.at)} · `,
+                        h(
+                          "span",
+                          {
+                            style: style.historyLink,
+                            role: "button",
+                            tabIndex: 0,
+                            onClick: () => {
+                              if (!insertText(v.content)) {
+                                setError("插入失败：请先把光标放进输入框再试。");
+                                return;
+                              }
+                              setError(null);
+                              setNotice("已插入旧版内容");
+                            },
+                            onKeyDown: (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                if (!insertText(v.content)) {
+                                  setError("插入失败：请先把光标放进输入框再试。");
+                                  return;
+                                }
+                                setError(null);
+                                setNotice("已插入旧版内容");
+                              }
+                            },
+                            title: "把这一版的内容插入输入框",
+                          },
+                          "插入旧版"
+                        )
+                      ),
                       v.content
                     )
                   )

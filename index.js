@@ -34,48 +34,78 @@ const TEMPLATE_PACK = [
     category: "开发",
     tags: ["代码", "审查"],
     content: "请审查下面这段代码，重点关注 {{关注点}}，指出潜在 bug、性能问题与可读性改进，并给出修改建议。\n\n```\n{{代码}}\n```",
+    variables: {
+      关注点: {
+        label: "关注点",
+        options: ["正确性、边界与命名", "性能与内存", "安全漏洞", "可读性与重构"],
+        default: "正确性、边界与命名",
+      },
+      代码: { label: "待审查代码", required: true },
+    },
   },
   {
     name: "Git 提交信息",
     category: "开发",
     tags: ["git", "提交"],
     content: "请根据以下变更，生成一条规范的 git commit message（约定式提交风格，一行标题 + 空行 + 要点式正文）：\n\n{{变更说明}}",
+    variables: { 变更说明: { label: "变更说明", required: true } },
   },
   {
     name: "Bug 排查",
     category: "开发",
     tags: ["bug", "排查"],
     content: "我遇到一个问题：{{现象}}。相关环境：{{环境}}。已尝试：{{已尝试}}。请按「现象 → 根因假设 → 验证方法 → 修复方案」逐步分析。",
+    variables: {
+      现象: { label: "问题现象", required: true },
+      环境: { label: "相关环境", default: "操作系统 / 版本 / 依赖" },
+      已尝试: { label: "已尝试的方法" },
+    },
   },
   {
     name: "周报",
     category: "写作",
     tags: ["周报", "工作"],
     content: "请根据以下要点，帮我整理成一份结构清晰的周报（本周完成 / 进行中 / 下周计划 / 风险与求助）：\n\n{{要点}}",
+    variables: { 要点: { label: "工作要点", required: true } },
   },
   {
     name: "翻译润色",
     category: "写作",
     tags: ["翻译", "润色"],
     content: "请把下面的内容翻译成 {{目标语言}}，并润色为自然流畅的表达，保留原意与格式：\n\n{{原文}}",
+    variables: {
+      目标语言: {
+        label: "目标语言",
+        options: ["英文", "简体中文", "繁体中文", "日文", "韩文", "法文", "德文"],
+        default: "英文",
+      },
+      原文: { label: "待翻译内容", required: true },
+    },
   },
   {
     name: "日报",
     category: "写作",
     tags: ["日报", "工作"],
     content: "今天是 {{date}}，请根据以下要点帮我生成一份工作日报（今日完成 / 明日计划 / 需要协调）：\n\n{{要点}}",
+    variables: { 要点: { label: "工作要点", required: true } },
   },
   {
     name: "会议纪要",
     category: "写作",
     tags: ["会议", "纪要"],
     content: "请把下面的会议记录整理成纪要（结论 / 待办与负责人 / 时间点）：\n\n{{记录}}",
+    variables: { 记录: { label: "会议记录", required: true } },
   },
   {
     name: "学习计划",
     category: "学习",
     tags: ["学习", "计划"],
     content: "我想在 {{时间}} 内掌握 {{主题}}，目前基础是 {{当前水平}}。请制定一个可执行的学习计划，分阶段列出目标、内容与检验方式。",
+    variables: {
+      时间: { label: "学习周期", default: "3 个月" },
+      主题: { label: "学习主题", required: true },
+      当前水平: { label: "当前基础", default: "零基础" },
+    },
   },
 ];
 
@@ -292,7 +322,7 @@ function seedTemplates() {
   const now = Date.now();
   const snippets = TEMPLATE_PACK.map((t, i) => {
     const { names } = scanPlaceholders(t.content);
-    const { variables } = normalizeVariables(names, {});
+    const { variables } = normalizeVariables(names, t.variables || {});
     return {
       id: randomUUID(),
       name: t.name,
@@ -957,17 +987,23 @@ async function saveSnippet(payload) {
       if (other) {
         return conflictError("name", `已有另一个片段叫「${name}」。`, other);
       }
-      // 记历史：被覆盖的这一版（name/content/variables 快照）
-      historyId = existing.id;
-      historySnapshot = {
-        name: existing.name,
-        content: existing.content,
-        variables: existing.variables,
-        category: existing.category,
-        tags: existing.tags,
-        at: existing.updatedAt,
-        revision: existing.revision,
-      };
+      // 记历史：被覆盖的这一版（name/content/variables 快照）。
+      // 只改分类/标签/置顶这类元数据时内容与变量都没动，不该产生一条历史版本，
+      // 否则「换了个标签」就多出一次可回退的旧版，历史列表会迅速被噪声塞满。
+      const contentChanged = existing.content !== content;
+      const variablesChanged = JSON.stringify(existing.variables) !== JSON.stringify(variables);
+      if (contentChanged || variablesChanged) {
+        historyId = existing.id;
+        historySnapshot = {
+          name: existing.name,
+          content: existing.content,
+          variables: existing.variables,
+          category: existing.category,
+          tags: existing.tags,
+          at: existing.updatedAt,
+          revision: existing.revision,
+        };
+      }
       existing.name = name;
       existing.content = content;
       existing.variables = variables;
@@ -1570,22 +1606,7 @@ async function dispatch(ctx, endpoint, payload, signal) {
       // 不重新落盘、不重新生成内容——否则会覆盖掉用户手工改过的导出文件。
       if (typeof payload?.revealPath === "string" && payload.revealPath.trim() !== "") {
         const p = payload.revealPath.trim();
-        let revealed = false;
-        let revealError = null;
-        if (process.platform === "win32") {
-          try {
-            const { spawn } = await import("node:child_process");
-            await new Promise((resolve) => {
-              const child = spawn("explorer.exe", [`/select,${p}`], { stdio: "ignore", detached: true });
-              child.on("error", () => resolve(false));
-              child.on("spawn", () => resolve(true));
-              setTimeout(() => resolve(true), 500);
-            });
-            revealed = true;
-          } catch (error) {
-            revealError = error instanceof Error ? error.message : String(error);
-          }
-        }
+        const { revealed, revealError } = await revealInFileManager(p);
         return { ok: true, value: { path: p, revealed, revealError: revealError || undefined } };
       }
       // payload.write = 文件名（字符串）时，落盘到数据目录的 exports/ 并回传路径。
@@ -1600,24 +1621,12 @@ async function dispatch(ctx, endpoint, payload, signal) {
         } catch (error) {
           return fail("internal", `写入导出文件失败：${error instanceof Error ? error.message : String(error)}`);
         }
-        // 请求方要求打开导出文件所在目录时，用系统默认方式 reveal（Windows: explorer /select）。
-        // 打开失败只降级不报错——用户仍可凭回传的绝对路径手动定位。
+        // 请求方要求打开导出文件所在目录时，用系统默认方式 reveal（Windows: explorer /select；
+        // macOS: open -R；Linux: xdg-open 目录）。打开失败只降级不报错——用户仍可凭回传的绝对路径手动定位。
         let revealed = false;
         let revealError = null;
-        if (payload.reveal === true && process.platform === "win32") {
-          try {
-            const { spawn } = await import("node:child_process");
-            await new Promise((resolve) => {
-              const p = spawn("explorer.exe", [`/select,${target}`], { stdio: "ignore", detached: true });
-              p.on("error", () => resolve(false));
-              p.on("spawn", () => resolve(true));
-              // explorer 可能已经存在则立即退出，也可能挂起；500ms 兜底，不阻塞导出结果
-              setTimeout(() => resolve(true), 500);
-            });
-            revealed = true;
-          } catch (error) {
-            revealError = error instanceof Error ? error.message : String(error);
-          }
+        if (payload.reveal === true) {
+          ({ revealed, revealError } = await revealInFileManager(target));
         }
         return {
           ok: true,
@@ -1686,6 +1695,42 @@ const ADD_USAGE = "/snippet add <名称> <内容> [--cat=<分类>] [--tag=<标�
 const USAGE = `${ADD_USAGE} | list | show <名称> | rm <名称|#id> | undo <名称|#id> | mv <名称> <新名称> | pin <名称|#id> | unpin <名称|#id> | tag <名称|#id> <标签…> | optimize <名称> | export [文件名] | import <文件路径> [--replace] [--dry]`;
 
 /** 导出文件名不能带路径分隔符，也不能是 `.`/`..`，避免写出数据目录。 */
+/**
+ * 用系统默认方式在文件管理器里定位一个已存在的文件。
+ * win32 → explorer /select,；darwin → open -R；linux 等 → xdg-open 所在目录。
+ * 打开失败只降级（revealed=false + revealError），不抛异常。
+ */
+async function revealInFileManager(filePath) {
+  let revealed = false;
+  let revealError = null;
+  try {
+    const { spawn } = await import("node:child_process");
+    let cmd;
+    let args;
+    if (process.platform === "win32") {
+      cmd = "explorer.exe";
+      args = [`/select,${filePath}`];
+    } else if (process.platform === "darwin") {
+      cmd = "open";
+      args = ["-R", filePath];
+    } else {
+      cmd = "xdg-open";
+      args = [dirname(filePath)];
+    }
+    await new Promise((resolve) => {
+      const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+      child.on("error", () => resolve(false));
+      child.on("spawn", () => resolve(true));
+      // 文件管理器可能立即退出也可能挂起；500ms 兜底，不阻塞导出结果
+      setTimeout(() => resolve(true), 500);
+    });
+    revealed = true;
+  } catch (error) {
+    revealError = error instanceof Error ? error.message : String(error);
+  }
+  return { revealed, revealError };
+}
+
 function safeExportName(raw) {
   const text = typeof raw === "string" ? raw.trim() : "";
   const base = text === "" ? "snippets" : text;

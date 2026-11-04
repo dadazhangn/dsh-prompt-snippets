@@ -264,7 +264,7 @@ check("有变量无元数据时不直插", inserted.length === 0, inserted.join(
 tree = rerender(registered.Component, props);
 let panelT = flat(tree.children.find((c) => c?.props?.id === "ps-panel")).filter((x) => typeof x === "string");
 check("弹出了占位符表单", panelT.some((x) => x.includes("填写「代码审查」的占位符")), panelT.join("|"));
-check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholder === "" && x?.props?.className === "ps-input"));
+check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholder === "" && (x?.props?.className === "ps-input" || x?.props?.className === "ps-textarea")));
 
 // ══════════ §2.5 表单：必填禁用、填值后插入、保留占位符插入 ══════════
 {
@@ -320,8 +320,10 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   let insBtn = findBtnByText(t, "插入");
   check("必填空着时插入按钮禁用", insBtn?.props?.disabled === true);
 
-  // 填必填项
-  const inputs = allNodes(panelOf(t)).filter((n) => n?.props?.className === "ps-input");
+  // 填必填项（「代码」因变量名含「代码」渲染为 textarea，「关注点」仍是单行 input）
+  const inputs = allNodes(panelOf(t)).filter(
+    (n) => n?.props?.className === "ps-input" || n?.props?.className === "ps-textarea"
+  );
   check("表单为每个变量渲染一个输入框", inputs.length === 2, String(inputs.length));
   inputs[0].props.onChange({ target: { value: "这段代码" } });
   t = rerender(registered.Component, props);
@@ -1391,8 +1393,8 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   const openHandler = keyHandlers.find((fn) => fn.toString().includes("shiftKey"));
   check("v1.3 命令面板注册了全局唤起快捷键", typeof openHandler === "function");
 
-  // 模拟 Ctrl+Shift+K
-  openHandler?.({ key: "k", ctrlKey: true, shiftKey: true, preventDefault: () => {} });
+  // 模拟 Ctrl+Shift+K（修复后按物理键位 code 判断，Shift 会把 key 变成大写 "K"）
+  openHandler?.({ key: "K", code: "KeyK", ctrlKey: true, shiftKey: true, preventDefault: () => {} });
   x = rerender(registered.Component, props);
   const overlay = paletteOf(x);
   check("v1.3 命令面板打开后渲染 overlay", !!overlay);
