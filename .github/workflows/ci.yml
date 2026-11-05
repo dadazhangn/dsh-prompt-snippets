@@ -12,7 +12,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
 
@@ -21,11 +25,13 @@ jobs:
           node-version: 22
 
       - name: 语法检查（host 半 + client 半）
+        shell: bash
         run: |
           node --check index.js
           node --check client.js
 
       - name: 测试套件
+        shell: bash
         run: |
           set -e
           node test/v110-host-test.mjs
