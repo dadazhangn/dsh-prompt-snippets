@@ -528,7 +528,16 @@ window.__ModuleLoader__.load({
         fontSize: "11px",
       },
       varName: { fontFamily: "ui-monospace, monospace", color: C.text, flexShrink: 0 },
-      checkWrap: { display: "inline-flex", alignItems: "center", gap: "3px", color: C.textDim, flexShrink: 0 },
+      // fontSize 必须显式给：checkWrap 的直接父级（editor / body / panel）都没有字号，
+      // 不写就会一路继承到上层会话容器，跟随用户的对话字体设置，出现「收藏置顶」比周围标签大一号。
+      checkWrap: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "3px",
+        color: C.textDim,
+        flexShrink: 0,
+        fontSize: "11px",
+      },
       actions: { display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap", paddingTop: "2px" },
       btnPrimary: {
         border: "1px solid " + C.border,
