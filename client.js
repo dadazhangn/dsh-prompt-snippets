@@ -1215,8 +1215,9 @@ window.__ModuleLoader__.load({
     const MAX_UNDO = 5;
 
     /** 把 throw 出来的任意值转成一句能看的错误文案。 */
+    // t 由 SnippetDock 闭包传入（参数），此处直接用全局兜底。
     function msgOf(err) {
-      if (!err) return t("error.unknown");
+      if (!err) return zh["error.unknown"];
       if (typeof err === "string") return err;
       return String(err.message || err);
     }
@@ -1374,7 +1375,7 @@ window.__ModuleLoader__.load({
         }
       }, [paletteOpen, paletteSelected]);
 
-      const openPalette = () => {
+      const _openPalette = () => {
         setPaletteQuery("");
         setPaletteSelected(-1);
         setPaletteOpen(true);
@@ -1856,15 +1857,15 @@ window.__ModuleLoader__.load({
               setReview((prev) =>
                 prev
                   ? {
-                      ...prev,
-                      optimized: String(value.optimized || ""),
-                      truncated: value.truncated === true,
-                      retries,
-                      busy: false,
-                      stopping: false,
-                      error: null,
-                    }
-                  : prev
+                    ...prev,
+                    optimized: String(value.optimized || ""),
+                    truncated: value.truncated === true,
+                    retries,
+                    busy: false,
+                    stopping: false,
+                    error: null,
+                  }
+                  : prev,
               );
               return;
             }
@@ -1875,7 +1876,7 @@ window.__ModuleLoader__.load({
               return;
             }
             setReview((prev) =>
-              prev ? { ...prev, busy: false, stopping: false, error: err.message || t("error.optimizeFailed") } : prev
+              prev ? { ...prev, busy: false, stopping: false, error: err.message || t("error.optimizeFailed") } : prev,
             );
           })
           .catch((e) => {
@@ -2107,8 +2108,8 @@ window.__ModuleLoader__.load({
           targets.map((t) =>
             Promise.resolve(rpc.call(CHANNEL, "restore", { id: t.id }))
               .then((r) => (r && r.ok ? t.id : null))
-              .catch(() => null)
-          )
+              .catch(() => null),
+          ),
         )
           .then((okIds) => {
             const good = okIds.filter((x) => x !== null);
@@ -2152,20 +2153,20 @@ window.__ModuleLoader__.load({
           { style: style.editor },
           e.conflict
             ? h(
-                "div",
-                { style: style.conflict },
-                h("span", { style: { flex: 1, minWidth: 0 } }, "⚠ " + e.conflict),
-                h(
-                  "button",
-                  { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => saveDraft(true) },
-                  t("edit.overwrite")
-                ),
-                h(
-                  "button",
-                  { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: reloadDraft },
-                  t("edit.reload")
-                )
-              )
+              "div",
+              { style: style.conflict },
+              h("span", { style: { flex: 1, minWidth: 0 } }, "⚠ " + e.conflict),
+              h(
+                "button",
+                { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => saveDraft(true) },
+                t("edit.overwrite"),
+              ),
+              h(
+                "button",
+                { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: reloadDraft },
+                t("edit.reload"),
+              ),
+            )
             : null,
           h(
             "label",
@@ -2179,7 +2180,7 @@ window.__ModuleLoader__.load({
               value: e.name,
               placeholder: t("edit.namePlaceholder"),
               onChange: (ev) => patchDraft({ name: ev.target.value }),
-            })
+            }),
           ),
           h(
             "label",
@@ -2192,7 +2193,7 @@ window.__ModuleLoader__.load({
               value: e.category,
               placeholder: t("edit.categoryPlaceholder"),
               onChange: (ev) => patchDraft({ category: ev.target.value }),
-            })
+            }),
           ),
           h(
             "label",
@@ -2211,7 +2212,7 @@ window.__ModuleLoader__.load({
                   .filter(Boolean);
                 patchDraft({ tags });
               },
-            })
+            }),
           ),
           h(
             "label",
@@ -2221,7 +2222,7 @@ window.__ModuleLoader__.load({
               checked: e.pinned === true,
               onChange: (ev) => patchDraft({ pinned: ev.target.checked }),
             }),
-            t("edit.pinned")
+            t("edit.pinned"),
           ),
           h(
             "label",
@@ -2232,55 +2233,55 @@ window.__ModuleLoader__.load({
               style: style.textarea,
               value: e.content,
               onChange: (ev) => patchDraft({ content: ev.target.value }),
-            })
+            }),
           ),
           names.length > 0
             ? h(
-                "div",
-                null,
-                h("div", { style: style.label }, t("edit.variables")),
-                names.map((nm) => {
-                  const d = e.variables[nm] || {};
-                  return h(
-                    "div",
-                    { key: nm, style: style.varRow },
-                    h("span", { style: style.varName }, "{{" + nm + "}}"),
-                    h(
-                      "label",
-                      { style: style.checkWrap },
-                      h("input", {
-                        type: "checkbox",
-                        checked: d.required === true,
-                        onChange: (ev) => setVar(nm, { required: ev.target.checked }),
-                      }),
-                      t("edit.required")
-                    ),
+              "div",
+              null,
+              h("div", { style: style.label }, t("edit.variables")),
+              names.map((nm) => {
+                const d = e.variables[nm] || {};
+                return h(
+                  "div",
+                  { key: nm, style: style.varRow },
+                  h("span", { style: style.varName }, "{{" + nm + "}}"),
+                  h(
+                    "label",
+                    { style: style.checkWrap },
                     h("input", {
-                      type: "text",
-                      className: "ps-input",
-                      style: { ...style.input, flex: "1 1 90px", width: "auto" },
-                      value: typeof d.default === "string" ? d.default : "",
-                      placeholder: t("edit.defaultPlaceholder"),
-                      onChange: (ev) => setVar(nm, { default: ev.target.value }),
+                      type: "checkbox",
+                      checked: d.required === true,
+                      onChange: (ev) => setVar(nm, { required: ev.target.checked }),
                     }),
-                    h("input", {
-                      type: "text",
-                      className: "ps-input",
-                      style: { ...style.input, flex: "1 1 90px", width: "auto" },
-                      value: Array.isArray(d.options) ? d.options.join("、") : "",
-                      placeholder: t("edit.enumPlaceholder"),
-                      title: t("edit.enumTitle"),
-                      onChange: (ev) => {
-                        const options = ev.target.value
-                          .split(/[,，、]/)
-                          .map((t) => t.trim())
-                          .filter(Boolean);
-                        setVar(nm, options.length > 0 ? { options } : { options: undefined });
-                      },
-                    })
-                  );
-                })
-              )
+                    t("edit.required"),
+                  ),
+                  h("input", {
+                    type: "text",
+                    className: "ps-input",
+                    style: { ...style.input, flex: "1 1 90px", width: "auto" },
+                    value: typeof d.default === "string" ? d.default : "",
+                    placeholder: t("edit.defaultPlaceholder"),
+                    onChange: (ev) => setVar(nm, { default: ev.target.value }),
+                  }),
+                  h("input", {
+                    type: "text",
+                    className: "ps-input",
+                    style: { ...style.input, flex: "1 1 90px", width: "auto" },
+                    value: Array.isArray(d.options) ? d.options.join("、") : "",
+                    placeholder: t("edit.enumPlaceholder"),
+                    title: t("edit.enumTitle"),
+                    onChange: (ev) => {
+                      const options = ev.target.value
+                        .split(/[,，、]/)
+                        .map((t) => t.trim())
+                        .filter(Boolean);
+                      setVar(nm, options.length > 0 ? { options } : { options: undefined });
+                    },
+                  }),
+                );
+              }),
+            )
             : null,
           e.hint ? h("div", { style: style.hintInline }, e.hint) : null,
           h(
@@ -2289,7 +2290,7 @@ window.__ModuleLoader__.load({
             h(
               "button",
               { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: cancelEdit },
-              e.confirmCancel ? t("edit.confirmCancel") : t("edit.cancel")
+              e.confirmCancel ? t("edit.confirmCancel") : t("edit.cancel"),
             ),
             h(
               "button",
@@ -2300,9 +2301,9 @@ window.__ModuleLoader__.load({
                 disabled: e.busy,
                 onClick: () => saveDraft(false),
               },
-              e.busy ? t("edit.saving") : t("edit.save")
-            )
-          )
+              e.busy ? t("edit.saving") : t("edit.save"),
+            ),
+          ),
         );
       };
 
@@ -2335,33 +2336,33 @@ window.__ModuleLoader__.load({
               h("span", { style: style.label }, label),
               opts.length > 0
                 ? h(
-                    "select",
-                    {
-                      className: "ps-select",
-                      style: style.select,
-                      value: val,
-                      onChange: (ev) => setFillValue(nm, ev.target.value),
-                    },
-                    // 非必填给一个空选项，让用户能「不填」（走变量名留空语义）
-                    !required ? h("option", { value: "" }, t("fill.empty")) : null,
-                    opts.map((o) => h("option", { key: o, value: o }, o))
-                  )
+                  "select",
+                  {
+                    className: "ps-select",
+                    style: style.select,
+                    value: val,
+                    onChange: (ev) => setFillValue(nm, ev.target.value),
+                  },
+                  // 非必填给一个空选项，让用户能「不填」（走变量名留空语义）
+                  !required ? h("option", { value: "" }, t("fill.empty")) : null,
+                  opts.map((o) => h("option", { key: o, value: o }, o)),
+                )
                 : multiline
-                ? h("textarea", {
+                  ? h("textarea", {
                     className: "ps-textarea",
                     style: { ...style.textarea, minHeight: "54px" },
                     value: val,
                     placeholder: typeof d.default === "string" ? d.default : "",
                     onChange: (ev) => setFillValue(nm, ev.target.value),
                   })
-                : h("input", {
+                  : h("input", {
                     type: "text",
                     className: "ps-input",
                     style: style.input,
                     value: val,
                     placeholder: typeof d.default === "string" ? d.default : "",
                     onChange: (ev) => setFillValue(nm, ev.target.value),
-                  })
+                  }),
             );
           }),
           h(
@@ -2370,12 +2371,12 @@ window.__ModuleLoader__.load({
             h(
               "button",
               { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => setFilling(null) },
-              t("fill.cancel")
+              t("fill.cancel"),
             ),
             h(
               "button",
               { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: insertRaw },
-              t("fill.keepRaw")
+              t("fill.keepRaw"),
             ),
             h(
               "button",
@@ -2386,9 +2387,9 @@ window.__ModuleLoader__.load({
                 disabled: blocked,
                 onClick: submitFill,
               },
-              t("fill.insert")
-            )
-          )
+              t("fill.insert"),
+            ),
+          ),
         );
       };
 
@@ -2408,8 +2409,8 @@ window.__ModuleLoader__.load({
         const optTitle = overLong
           ? t("review.overLong")
           : lost.length > 0
-          ? `优化结果丢失了占位符 ${lost.map((n) => `{{${n}}}`).join("、")}`
-          : t("review.replacePrompt");
+            ? `优化结果丢失了占位符 ${lost.map((n) => `{{${n}}}`).join("、")}`
+            : t("review.replacePrompt");
         return h(
           "div",
           { style: style.reviewWrap },
@@ -2424,7 +2425,7 @@ window.__ModuleLoader__.load({
                 "div",
                 { style: style.reviewCol },
                 h("div", { style: style.label }, t("review.original")),
-                h("div", { style: style.reviewPane }, cur.original)
+                h("div", { style: style.reviewPane }, cur.original),
               ),
               h(
                 "div",
@@ -2440,9 +2441,9 @@ window.__ModuleLoader__.load({
                     placeholder: cur.busy ? (cur.stopping ? t("review.stopping") : t("review.generating")) : t("review.empty"),
                     onChange: (ev) =>
                       setReview((prev) => (prev ? { ...prev, optimized: ev.target.value } : prev)),
-                  }
-                )
-              )
+                  },
+                ),
+              ),
             ),
             h(
               "div",
@@ -2450,43 +2451,43 @@ window.__ModuleLoader__.load({
               h("span", null, `字节 ${byteLen(cur.original)} → ${byteLen(cur.optimized)}`),
               before.length > 0
                 ? h(
-                    "span",
-                    { style: lost.length > 0 ? style.reviewLost : style.reviewKeep },
-                    lost.length > 0
-                      ? `占位符丢失：${lost.map((n) => `{{${n}}}`).join("、")}`
-                      : `占位符 ${before.map((n) => `{{${n}}}`).join("、")} 已保留 ✓`
-                  )
+                  "span",
+                  { style: lost.length > 0 ? style.reviewLost : style.reviewKeep },
+                  lost.length > 0
+                    ? `占位符丢失：${lost.map((n) => `{{${n}}}`).join("、")}`
+                    : `占位符 ${before.map((n) => `{{${n}}}`).join("、")} 已保留 ✓`,
+                )
                 : null,
               cur.retries > 0 ? h("span", null, `已重试 ${cur.retries} 次`) : null,
-              overLong ? h("span", { style: style.reviewLost }, t("review.overLongWarning")) : null
+              overLong ? h("span", { style: style.reviewLost }, t("review.overLongWarning")) : null,
             ),
             cur.conflict
               ? h(
-                  "div",
-                  { style: style.conflict },
-                  h("span", { style: style.reviewLost }, cur.conflict),
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      className: "ps-ghost",
-                      style: style.btnGhost,
-                      onClick: () => saveOptimized(true),
-                      disabled: cur.saving,
-                    },
-                    t("review.applyOverwrite")
-                  ),
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      className: "ps-ghost",
-                      style: style.btnGhost,
-                      onClick: () => setReview((prev) => (prev ? { ...prev, conflict: null } : prev)),
-                    },
-                    t("review.discard")
-                  )
-                )
+                "div",
+                { style: style.conflict },
+                h("span", { style: style.reviewLost }, cur.conflict),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "ps-ghost",
+                    style: style.btnGhost,
+                    onClick: () => saveOptimized(true),
+                    disabled: cur.saving,
+                  },
+                  t("review.applyOverwrite"),
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "ps-ghost",
+                    style: style.btnGhost,
+                    onClick: () => setReview((prev) => (prev ? { ...prev, conflict: null } : prev)),
+                  },
+                  t("review.discard"),
+                ),
+              )
               : null,
             cur.error ? h("div", { style: style.hintInline }, "⚠ " + cur.error) : null,
             h(
@@ -2502,7 +2503,7 @@ window.__ModuleLoader__.load({
                   disabled: cur.busy,
                   title: t("review.keepOriginalTitle"),
                 },
-                t("review.keepOriginal")
+                t("review.keepOriginal"),
               ),
               h(
                 "button",
@@ -2513,7 +2514,7 @@ window.__ModuleLoader__.load({
                   onClick: stopOptimize,
                   title: cur.busy ? t("review.cancelOptimize") : t("review.close"),
                 },
-                cur.busy ? (cur.stopping ? t("review.cancelling") : t("review.cancel")) : "✕"
+                cur.busy ? (cur.stopping ? t("review.cancelling") : t("review.cancel")) : "✕",
               ),
               h(
                 "button",
@@ -2525,7 +2526,7 @@ window.__ModuleLoader__.load({
                   disabled: !canRetry,
                   title: canRetry ? t("review.retryTitle") : t("review.retryMaxTitle", { n: MAX_RETRY }),
                 },
-                canRetry ? t("review.retry") : t("review.retryMaxTitle", { n: MAX_RETRY })
+                canRetry ? t("review.retry") : t("review.retryMaxTitle", { n: MAX_RETRY }),
               ),
               h(
                 "button",
@@ -2537,7 +2538,7 @@ window.__ModuleLoader__.load({
                   disabled: !canReplace,
                   title: optTitle,
                 },
-                cur.saving ? t("review.replacing") : t("review.replaceContent")
+                cur.saving ? t("review.replacing") : t("review.replaceContent"),
               ),
               h(
                 "button",
@@ -2549,10 +2550,10 @@ window.__ModuleLoader__.load({
                   disabled: cur.busy || !cur.optimized,
                   title: t("review.insertOptimizedTitle"),
                 },
-                t("review.insertOptimized")
-              )
-            )
-          )
+                t("review.insertOptimized"),
+              ),
+            ),
+          ),
         );
       };
 
@@ -2572,15 +2573,15 @@ window.__ModuleLoader__.load({
                   editing && editing.id === s.id
                     ? { ...style.item, ...style.itemEditing }
                     : selected === idx
-                    ? { ...style.item, ...style.itemSelected }
-                    : style.item,
+                      ? { ...style.item, ...style.itemSelected }
+                      : style.item,
                 onClick: () => insert(s),
                 onMouseEnter: () => setSelected(idx),
                 title: t("item.insertTitle", { content: s.content }),
               },
               ...(s.pinned === true ? [h("span", { style: style.pinStar }, "★ ")] : []),
               highlightText(s.name, trimmedQuery),
-              ...((s.tags || []).map((t) => h("span", { key: t, style: style.tagChip }, t)))
+              ...((s.tags || []).map((t) => h("span", { key: t, style: style.tagChip }, t))),
             ),
             h(
               "button",
@@ -2593,7 +2594,7 @@ window.__ModuleLoader__.load({
                 title: readOnly ? t("item.editReadonly") : t("item.edit"),
                 "aria-label": `编辑「${s.name}」`,
               },
-              "✏️"
+              "✏️",
             ),
             h(
               "button",
@@ -2605,7 +2606,7 @@ window.__ModuleLoader__.load({
                 title: t("item.history"),
                 "aria-label": `历史「${s.name}」`,
               },
-              "🕘"
+              "🕘",
             ),
             h(
               "button",
@@ -2616,15 +2617,15 @@ window.__ModuleLoader__.load({
                   optimizing === s.id
                     ? { ...style.icon, ...style.iconBusy }
                     : optAvail.available
-                    ? style.icon
-                    : { ...style.icon, ...style.iconBusy },
+                      ? style.icon
+                      : { ...style.icon, ...style.iconBusy },
                 onClick: () => optimize(s),
                 // 无默认模型时直接置灰：不要留到点击才报错（ROADMAP §3.1）
                 disabled: optimizing !== null || !optAvail.available,
                 title: optAvail.available ? t("item.optimize") : optAvail.reason || t("item.noModel"),
                 "aria-label": `AI 优化「${s.name}」`,
               },
-              optimizing === s.id ? "…" : "✨"
+              optimizing === s.id ? "…" : "✨",
             ),
             h(
               "button",
@@ -2637,10 +2638,10 @@ window.__ModuleLoader__.load({
                 title: readOnly ? t("item.deleteReadonly") : t("item.delete"),
                 "aria-label": `删除「${s.name}」`,
               },
-              deleting === s.id ? "…" : "🗑"
-            )
+              deleting === s.id ? "…" : "🗑",
+            ),
           ),
-          editing && editing.id === s.id ? renderEditor() : null
+          editing && editing.id === s.id ? renderEditor() : null,
         );
 
       const listContent = groupByCategory(visible).map(([category, list]) =>
@@ -2649,14 +2650,14 @@ window.__ModuleLoader__.load({
           { key: category || "__none__" },
           category
             ? h(
-                "div",
-                { style: style.group },
-                category,
-                view === "pinned" ? h("span", { style: style.groupStar }, " ★") : null
-              )
+              "div",
+              { style: style.group },
+              category,
+              view === "pinned" ? h("span", { style: style.groupStar }, " ★") : null,
+            )
             : null,
-          list.map((s) => rowOf(s, visible.indexOf(s)))
-        )
+          list.map((s) => rowOf(s, visible.indexOf(s))),
+        ),
       );
 
       const showHistory = (snippet) => {
@@ -2720,33 +2721,33 @@ window.__ModuleLoader__.load({
               paletteResults.length === 0
                 ? h("div", { style: style.empty }, snippets.length === 0 ? t("palette.empty") : t("palette.noMatch", { query: paletteQuery }))
                 : paletteResults.map((s, i) =>
+                  h(
+                    "button",
+                    {
+                      key: s.id,
+                      type: "button",
+                      className: "ps-item",
+                      "data-ps-index": i,
+                      style: i === paletteSelected ? style.paletteRowActive : style.paletteRow,
+                      onMouseEnter: () => setPaletteSelected(i),
+                      onClick: () => paletteChoose(s),
+                    },
+                    s.pinned === true ? h("span", { style: style.pinStar }, "★ ") : null,
+                    h("span", { style: style.paletteName }, highlightText(s.name, paletteQuery.trim())),
                     h(
-                      "button",
-                      {
-                        key: s.id,
-                        type: "button",
-                        className: "ps-item",
-                        "data-ps-index": i,
-                        style: i === paletteSelected ? style.paletteRowActive : style.paletteRow,
-                        onMouseEnter: () => setPaletteSelected(i),
-                        onClick: () => paletteChoose(s),
-                      },
-                      s.pinned === true ? h("span", { style: style.pinStar }, "★ ") : null,
-                      h("span", { style: style.paletteName }, highlightText(s.name, paletteQuery.trim())),
-                      h(
-                        "span",
-                        { style: style.paletteMeta },
-                        [s.category, (s.tags || []).join(" · ")].filter(Boolean).join(" · ") || t("palette.noCategory")
-                      )
-                    )
-                  )
+                      "span",
+                      { style: style.paletteMeta },
+                      [s.category, (s.tags || []).join(" · ")].filter(Boolean).join(" · ") || t("palette.noCategory"),
+                    ),
+                  ),
+                ),
             ),
             h(
               "div",
               { style: style.paletteHint },
-              t("palette.hint")
-            )
-          )
+              t("palette.hint"),
+            ),
+          ),
         );
       };
 
@@ -2763,8 +2764,8 @@ window.__ModuleLoader__.load({
             hh.busy
               ? h("div", { style: style.hintInline }, t("history.loading"))
               : hh.list.length === 0
-              ? h("div", { style: style.hintInline }, t("history.empty"))
-              : hh.list.map((v, i) =>
+                ? h("div", { style: style.hintInline }, t("history.empty"))
+                : hh.list.map((v, i) =>
                   h(
                     "div",
                     { key: i, style: style.historyRow },
@@ -2803,47 +2804,47 @@ window.__ModuleLoader__.load({
                             },
                             title: t("history.insertTitle"),
                           },
-                          t("history.insert")
-                        )
+                          t("history.insert"),
+                        ),
                       ),
-                      v.content
-                    )
-                  )
-                )
-          )
+                      v.content,
+                    ),
+                  ),
+                ),
+          ),
         );
       };
 
       const bodyContent = error
         ? h("div", { style: style.error }, "⚠ " + error)
         : snippets.length === 0
-        ? h("div", { style: style.empty }, t("panel.empty"))
-        : visible.length === 0
-        ? h(
-            "div",
-            { style: style.empty },
-            `没有匹配「${query}」的片段。`,
-            h(
-              "button",
-              {
-                type: "button",
-                className: "ps-ghost",
-                style: { ...style.btnGhost, marginTop: "8px" },
-                onClick: () => {
-                  setQuery("");
-                  setSelected(-1);
-                  beginCreate();
-                  setTimeout(() => {
-                    if (nameRef.current) nameRef.current.value = trimmedQuery;
-                    if (nameRef.current) nameRef.current.focus();
-                  }, 0);
+          ? h("div", { style: style.empty }, t("panel.empty"))
+          : visible.length === 0
+            ? h(
+              "div",
+              { style: style.empty },
+              `没有匹配「${query}」的片段。`,
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "ps-ghost",
+                  style: { ...style.btnGhost, marginTop: "8px" },
+                  onClick: () => {
+                    setQuery("");
+                    setSelected(-1);
+                    beginCreate();
+                    setTimeout(() => {
+                      if (nameRef.current) nameRef.current.value = trimmedQuery;
+                      if (nameRef.current) nameRef.current.focus();
+                    }, 0);
+                  },
+                  title: t("panel.newTitle"),
                 },
-                title: t("panel.newTitle"),
-              },
-              trimmedQuery ? t("panel.newFromQuery", { query: trimmedQuery }) : t("panel.new")
+                trimmedQuery ? t("panel.newFromQuery", { query: trimmedQuery }) : t("panel.new"),
+              ),
             )
-          )
-        : listContent;
+            : listContent;
 
       return h(
         "div",
@@ -2859,7 +2860,7 @@ window.__ModuleLoader__.load({
             title: t("panel.title"),
             "aria-expanded": open ? "true" : "false",
           },
-          t("panel.button")
+          t("panel.button"),
         ),
         notice ? h("span", { className: "ps-notice", style: style.notice }, notice) : null,
         renderPalette(),
@@ -2907,8 +2908,8 @@ window.__ModuleLoader__.load({
                   onMouseDown: (e) => e.stopPropagation(),
                   onClick: () => setOpen(false),
                 },
-                "×"
-              )
+                "×",
+              ),
             ),
             warning ? h("div", { className: "ps-warn", style: style.warn }, "⚠ " + warning) : null,
             h(
@@ -2961,8 +2962,8 @@ window.__ModuleLoader__.load({
                 }),
                 query.trim()
                   ? h("span", { style: style.searchCount }, `${selected >= 0 ? selected + 1 : "-"}/${visible.length}`)
-                  : null
-              )
+                  : null,
+              ),
             ),
             review ? renderReview() : null,
             filling ? h("div", { style: style.formWrap }, renderFillForm()) : null,
@@ -2977,7 +2978,7 @@ window.__ModuleLoader__.load({
                   style: view === "all" ? style.viewBtnActive : style.viewBtn,
                   onClick: () => setView("all"),
                 },
-                t("panel.all")
+                t("panel.all"),
               ),
               h(
                 "button",
@@ -2988,7 +2989,7 @@ window.__ModuleLoader__.load({
                   onClick: () => setView("pinned"),
                   title: t("panel.pinnedTitle"),
                 },
-                t("panel.pinned")
+                t("panel.pinned"),
               ),
               h(
                 "button",
@@ -2999,167 +3000,167 @@ window.__ModuleLoader__.load({
                   onClick: () => setView("recent"),
                   title: t("panel.recentTitle"),
                 },
-                t("panel.recent")
-              )
+                t("panel.recent"),
+              ),
             ),
             history ? renderHistory() : null,
             h("div", { className: "ps-body", style: style.body }, bodyContent),
             editing && editing.id === null
               ? h("div", { style: style.formWrap }, renderEditor())
               : h(
-                  "div",
-                  { style: style.addRow },
-                  h("span", { style: style.addRowInner },
-                    h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "ps-ghost",
-                        style: readOnly ? { ...style.btnGhost, ...style.btnDisabled } : style.btnGhost,
-                        onClick: beginCreate,
-                        disabled: readOnly || (editing !== null && editing.dirty),
-                        title: readOnly ? t("panel.newBtnReadonly") : t("panel.newBtnTitle"),
-                      },
-                      t("panel.newBtn")
-                    ),
-                    h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "ps-ghost",
-                        style: exporting ? { ...style.btnGhost, ...style.btnDisabled } : style.btnGhost,
-                        onClick: exportAll,
-                        disabled: exporting || snippets.length === 0,
-                        title: t("panel.exportTitle"),
-                      },
-                      exporting ? t("panel.exporting") : t("panel.export")
-                    ),
-                    h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "ps-ghost",
-                        style: importOpen ? { ...style.btnGhost, ...style.itemEditing } : style.btnGhost,
-                        onClick: () => {
-                          setImportOpen((prev) => !prev);
-                          setError(null);
-                        },
-                        disabled: readOnly,
-                        title: readOnly ? t("panel.importReadonly") : t("panel.importTitle"),
-                      },
-                      t("panel.import")
-                    )
-                  )
-                ),
-            importOpen
-              ? h(
-                  "div",
-                  { style: style.formWrap },
-                  h(
-                    "div",
-                    { style: style.editor },
-                    h("div", { style: style.label }, t("panel.importPathLabel")),
-                    h("input", {
-                      type: "text",
-                      className: "ps-input",
-                      style: style.input,
-                      value: importPath,
-                      placeholder: t("panel.importPathPlaceholder"),
-                      onChange: (e) => setImportPath(e.target.value),
-                      onKeyDown: (e) => {
-                        if (e.key === "Enter") doImport();
-                        if (e.key === "Escape") setImportOpen(false);
-                      },
-                    }),
-                    h(
-                      "label",
-                      { style: style.checkWrap },
-                      h("input", {
-                        type: "checkbox",
-                        checked: importReplace,
-                        onChange: (e) => setImportReplace(e.target.checked),
-                      }),
-                      h("span", { style: style.label }, t("panel.importReplaceLabel"))
-                    ),
-                    h(
-                      "div",
-                      { style: style.actions },
-                      h(
-                        "button",
-                        { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => setImportOpen(false) },
-                        t("panel.cancel")
-                      ),
-                      h(
-                        "button",
-                        {
-                          type: "button",
-                          className: "ps-primary",
-                          style: importing ? { ...style.btnPrimary, ...style.btnDisabled } : style.btnPrimary,
-                          disabled: importing,
-                          onClick: doImport,
-                        },
-                        importing ? t("panel.importing") : t("panel.importBtn")
-                      )
-                    )
-                  )
-                )
-              : null,
-            exportPath
-              ? h(
-                  "div",
-                  { style: style.exportBar },
-                  h("span", { style: style.exportText, title: exportPath }, "📄 " + exportPath),
+                "div",
+                { style: style.addRow },
+                h("span", { style: style.addRowInner },
                   h(
                     "button",
                     {
                       type: "button",
                       className: "ps-ghost",
-                      style: { ...style.btnGhost, padding: "1px 8px", fontSize: "11px" },
-                      onClick: () => revealExport(exportPath),
-                      title: t("panel.openFileTitle"),
+                      style: readOnly ? { ...style.btnGhost, ...style.btnDisabled } : style.btnGhost,
+                      onClick: beginCreate,
+                      disabled: readOnly || (editing !== null && editing.dirty),
+                      title: readOnly ? t("panel.newBtnReadonly") : t("panel.newBtnTitle"),
                     },
-                    t("panel.openFile")
-                  )
-                )
-              : null,
-            deleted.length > 0
-              ? h(
-                  "div",
-                  { style: style.undoBar },
-                  h(
-                    "span",
-                    { style: style.undoText },
-                    deleted.length === 1 ? `已删除「${deleted[0].name}」` : `已删除 ${deleted.length} 条`
+                    t("panel.newBtn"),
                   ),
-                  deleted.map((d) =>
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "ps-ghost",
+                      style: exporting ? { ...style.btnGhost, ...style.btnDisabled } : style.btnGhost,
+                      onClick: exportAll,
+                      disabled: exporting || snippets.length === 0,
+                      title: t("panel.exportTitle"),
+                    },
+                    exporting ? t("panel.exporting") : t("panel.export"),
+                  ),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "ps-ghost",
+                      style: importOpen ? { ...style.btnGhost, ...style.itemEditing } : style.btnGhost,
+                      onClick: () => {
+                        setImportOpen((prev) => !prev);
+                        setError(null);
+                      },
+                      disabled: readOnly,
+                      title: readOnly ? t("panel.importReadonly") : t("panel.importTitle"),
+                    },
+                    t("panel.import"),
+                  ),
+                ),
+              ),
+            importOpen
+              ? h(
+                "div",
+                { style: style.formWrap },
+                h(
+                  "div",
+                  { style: style.editor },
+                  h("div", { style: style.label }, t("panel.importPathLabel")),
+                  h("input", {
+                    type: "text",
+                    className: "ps-input",
+                    style: style.input,
+                    value: importPath,
+                    placeholder: t("panel.importPathPlaceholder"),
+                    onChange: (e) => setImportPath(e.target.value),
+                    onKeyDown: (e) => {
+                      if (e.key === "Enter") doImport();
+                      if (e.key === "Escape") setImportOpen(false);
+                    },
+                  }),
+                  h(
+                    "label",
+                    { style: style.checkWrap },
+                    h("input", {
+                      type: "checkbox",
+                      checked: importReplace,
+                      onChange: (e) => setImportReplace(e.target.checked),
+                    }),
+                    h("span", { style: style.label }, t("panel.importReplaceLabel")),
+                  ),
+                  h(
+                    "div",
+                    { style: style.actions },
+                    h(
+                      "button",
+                      { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => setImportOpen(false) },
+                      t("panel.cancel"),
+                    ),
                     h(
                       "button",
                       {
-                        key: d.id,
                         type: "button",
-                        className: "ps-undo",
-                        style: style.undoChip,
-                        onClick: () => undoOne(d),
-                        title: `恢复「${d.name}」`,
+                        className: "ps-primary",
+                        style: importing ? { ...style.btnPrimary, ...style.btnDisabled } : style.btnPrimary,
+                        disabled: importing,
+                        onClick: doImport,
                       },
-                      "↩ " + d.name
-                    )
+                      importing ? t("panel.importing") : t("panel.importBtn"),
+                    ),
                   ),
-                  deleted.length > 1
-                    ? h(
-                        "button",
-                        { type: "button", className: "ps-undo", style: style.undoBtn, onClick: undoAll },
-                        t("panel.undoAll")
-                      )
-                    : null
-                )
+                ),
+              )
+              : null,
+            exportPath
+              ? h(
+                "div",
+                { style: style.exportBar },
+                h("span", { style: style.exportText, title: exportPath }, "📄 " + exportPath),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "ps-ghost",
+                    style: { ...style.btnGhost, padding: "1px 8px", fontSize: "11px" },
+                    onClick: () => revealExport(exportPath),
+                    title: t("panel.openFileTitle"),
+                  },
+                  t("panel.openFile"),
+                ),
+              )
+              : null,
+            deleted.length > 0
+              ? h(
+                "div",
+                { style: style.undoBar },
+                h(
+                  "span",
+                  { style: style.undoText },
+                  deleted.length === 1 ? `已删除「${deleted[0].name}」` : `已删除 ${deleted.length} 条`,
+                ),
+                deleted.map((d) =>
+                  h(
+                    "button",
+                    {
+                      key: d.id,
+                      type: "button",
+                      className: "ps-undo",
+                      style: style.undoChip,
+                      onClick: () => undoOne(d),
+                      title: `恢复「${d.name}」`,
+                    },
+                    "↩ " + d.name,
+                  ),
+                ),
+                deleted.length > 1
+                  ? h(
+                    "button",
+                    { type: "button", className: "ps-undo", style: style.undoBtn, onClick: undoAll },
+                    t("panel.undoAll"),
+                  )
+                  : null,
+              )
               : null,
             h(
               "div",
               { style: style.hint },
-              t("panel.footer")
-            )
-          )
+              t("panel.footer"),
+            ),
+          ),
       );
     }
 
@@ -3190,8 +3191,8 @@ window.__ModuleLoader__.load({
               order: 10,
               inject: () => ({ rpc, t, localeSubscribe }),
             },
-            SnippetDock
-          )
+            SnippetDock,
+          ),
         );
       },
     };

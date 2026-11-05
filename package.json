@@ -52,10 +52,14 @@
     "LICENSE"
   ],
   "scripts": {
+    "lint": "eslint index.js client.js",
+    "lint:fix": "eslint index.js client.js --fix",
     "test": "node test/v110-host-test.mjs && node test/optimize-test.mjs && node test/io-test.mjs && node test/client-test.mjs && node test/client-error-test.mjs"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,
@@ -64,5 +68,8 @@
         "@deepseek-ai/dsh-client-connection"
       ]
     }
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1"
   }
 }

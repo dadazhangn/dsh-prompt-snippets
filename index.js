@@ -294,7 +294,7 @@ function normalizeTags(input) {
 }
 
 /** 用给定值渲染；缺必填项时返回 missing。 */
-function renderContent(tokens, variables, values) {
+function _renderContent(tokens, variables, values) {
   let text = "";
   const missing = [];
   for (const tk of tokens) {
@@ -398,7 +398,7 @@ function migrate(data) {
     const deletedAt = Number.isFinite(item.deletedAt) && item.deletedAt > 0 ? item.deletedAt : null;
     if (deletedAt !== (item.deletedAt ?? null)) changed = true;
 
-    let revision = Number.isInteger(item.revision) && item.revision >= 1 ? item.revision : 1;
+    const revision = Number.isInteger(item.revision) && item.revision >= 1 ? item.revision : 1;
     if (revision !== item.revision) {
       changed = true;
       stats.filled++;
@@ -753,7 +753,7 @@ function withLock(task) {
   const run = queue.then(task, task);
   queue = run.then(
     () => undefined,
-    () => undefined
+    () => undefined,
   );
   return run;
 }
@@ -892,7 +892,7 @@ async function optimize(ctx, content, signal) {
   if (lost.length > 0) {
     return fail(
       "internal",
-      `优化结果丢失了占位符 ${lost.map((n) => `{{${n}}}`).join("、")}，请再试一次。`
+      `优化结果丢失了占位符 ${lost.map((n) => `{{${n}}}`).join("、")}，请再试一次。`,
     );
   }
 
@@ -960,7 +960,7 @@ async function saveSnippet(payload) {
         return conflictError(
           "name",
           `有 ${found.ambiguous.length} 个片段都叫「${rawRef}」，无法确定改哪一个。`,
-          found.ambiguous[0]
+          found.ambiguous[0],
         );
       }
       existing = found.snippet;
@@ -980,7 +980,7 @@ async function saveSnippet(payload) {
         return conflictError(
           "revision",
           `该片段已被他处修改（当前 revision ${existing.revision}，你基于 ${expectedRevision}）。`,
-          existing
+          existing,
         );
       }
       const other = nameTaken(store, name, existing.id);
@@ -1082,9 +1082,9 @@ async function deleteSnippet(payload) {
         return conflictError(
           "name",
           `有 ${found.ambiguous.length} 个片段都叫「${ref}」，无法确定删哪一个。\n请指定其中一个：\n${candidateList(
-            found.ambiguous
+            found.ambiguous,
           ).join("\n")}`,
-          found.ambiguous[0]
+          found.ambiguous[0],
         );
       }
       target = found.snippet;
@@ -1093,7 +1093,7 @@ async function deleteSnippet(payload) {
       return conflictError(
         "revision",
         `该片段已被他处修改（当前 revision ${target.revision}）。`,
-        target
+        target,
       );
     }
     target.deletedAt = Date.now();
@@ -1125,9 +1125,9 @@ async function restoreSnippet(payload) {
         return conflictError(
           "name",
           `有 ${found.ambiguous.length} 个已删除片段叫「${ref}」，无法确定恢复哪一个。\n${candidateList(
-            found.ambiguous
+            found.ambiguous,
           ).join("\n")}`,
-          found.ambiguous[0]
+          found.ambiguous[0],
         );
       }
       target = found.snippet;
@@ -1139,7 +1139,7 @@ async function restoreSnippet(payload) {
       return conflictError(
         "name",
         `已有一个在用片段叫「${target.name}」（#${other.id.slice(0, 6)}），恢复会重名。请先给它改名。`,
-        other
+        other,
       );
     }
 
@@ -1303,8 +1303,8 @@ async function importSnippets(payload) {
   const rawBytes = typeof payload?.rawBytes === "number" && payload.rawBytes >= 0
     ? payload.rawBytes
     : payload?.json != null
-    ? byteLength(payload.json)
-    : 0;
+      ? byteLength(payload.json)
+      : 0;
   if (rawBytes > MAX_IMPORT_BYTES) {
     return fail("bad-request", `导入内容过大（${rawBytes} 字节，上限 ${MAX_IMPORT_BYTES} 字节）`);
   }
@@ -1408,7 +1408,7 @@ async function importSnippets(payload) {
  *   add <名称> <正文…> -- --cat         → "--" 之后全按字面，可写结尾的 --cat
  */
 function parseAddArgs(rest) {
-  let tokens = rest.slice();
+  const tokens = rest.slice();
   let category = null;
   let hasCategory = false;
   let tags = [];
@@ -1511,7 +1511,7 @@ function parseAddArgs(rest) {
         t.startsWith("--tag=") ||
         t.startsWith("-t=") ||
         t === "--pin" ||
-        t === "-p"
+        t === "-p",
     );
     if (hit) {
       notice = `正文里的「${hit}」已按字面保留。要设置分类/标签/收藏请写在行尾（--cat=分类 --tag=标签 --pin），或先用 -- 结束选项。`;
@@ -1671,7 +1671,7 @@ async function dispatch(ctx, endpoint, payload, signal) {
           } catch (error) {
             return fail(
               "bad-request",
-              `读不到导入文件「${target}」：${error instanceof Error ? error.message : String(error)}`
+              `读不到导入文件「${target}」：${error instanceof Error ? error.message : String(error)}`,
             );
           }
         }
@@ -1686,7 +1686,7 @@ async function dispatch(ctx, endpoint, payload, signal) {
     default:
       return fail(
         "not-found",
-        `未知操作：${String(endpoint)}（host 端可能仍是旧代码，请重启 DSH）`
+        `未知操作：${String(endpoint)}（host 端可能仍是旧代码，请重启 DSH）`,
       );
   }
 }
@@ -1818,13 +1818,13 @@ export function apply(ctx) {
             vars.length === 0
               ? ""
               : `\n\n变量：\n${vars
-                  .map(
-                    ([k, v]) =>
-                      `  {{${k}}}${v.required ? "（必填）" : ""}${typeof v.default === "string" && v.default ? ` 默认「${v.default}」` : ""}${
-                        Array.isArray(v.options) ? ` 选项 ${v.options.join(" / ")}` : ""
-                      }`
-                  )
-                  .join("\n")}`;
+                .map(
+                  ([k, v]) =>
+                    `  {{${k}}}${v.required ? "（必填）" : ""}${typeof v.default === "string" && v.default ? ` 默认「${v.default}」` : ""}${
+                      Array.isArray(v.options) ? ` 选项 ${v.options.join(" / ")}` : ""
+                    }`,
+                )
+                .join("\n")}`;
           return {
             kind: "success",
             text: `#${s.id.slice(0, 6)}  ${s.name}${s.category ? ` [${s.category}]` : ""}${pinText}  rev ${s.revision}${tagText}\n\n${s.content}${varText}`,
@@ -1895,7 +1895,7 @@ export function apply(ctx) {
             return {
               kind: "error",
               text: `有 ${found.ambiguous.length} 个片段都叫「${ref}」，无法确定改哪一个：\n${candidateList(
-                found.ambiguous
+                found.ambiguous,
               ).join("\n")}`,
             };
           }
@@ -1990,7 +1990,7 @@ export function apply(ctx) {
             return {
               kind: "error",
               text: `有 ${found.ambiguous.length} 个片段都叫「${ref}」，无法确定优化哪一个：\n${candidateList(
-                found.ambiguous
+                found.ambiguous,
               ).join("\n")}`,
             };
           }
@@ -2024,7 +2024,7 @@ export function apply(ctx) {
             ctx,
             "import",
             { path: target, mode: replace ? "replace" : "merge", dryRun },
-            signal
+            signal,
           );
           if (!result.ok) return { kind: "error", text: result.error.message };
           const p = result.value.plan;

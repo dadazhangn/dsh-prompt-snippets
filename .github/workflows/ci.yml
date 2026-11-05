@@ -24,6 +24,10 @@ jobs:
         with:
           node-version: 22
 
+      - name: ESLint
+        shell: bash
+        run: npx eslint index.js client.js
+
       - name: 语法检查（host 半 + client 半）
         shell: bash
         run: |
