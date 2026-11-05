@@ -1,6 +1,9 @@
 # 提示词片段库（Prompt Snippets）
 
 [![CI](https://github.com/dadazhangn/dsh-prompt-snippets/actions/workflows/ci.yml/badge.svg)](https://github.com/dadazhangn/dsh-prompt-snippets/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/dsh-prompt-snippets)](https://www.npmjs.com/package/dsh-prompt-snippets)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-prompt-snippets)](https://www.npmjs.com/package/dsh-prompt-snippets)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 <p align="center">
   <img src="docs/feature-map.svg" alt="Prompt Snippets 占位符三态填充流程" width="800">
@@ -20,7 +23,7 @@ dsh plugin --profile web add dsh-prompt-snippets
 ```
 
 `web` 换成你实际使用的 profile 名即可（本机 profile 在 `~/.dsh/profiles/<名字>`）。
-装完重启 DSH，刷新页面，输入框下方会出现「📋 片段库」按钮。
+装完重启 DSH，刷新页面，输入框工具条那一行会出现「📋 片段库」按钮（与模型选择器、权限控件同排，位于发送按钮之前）。
 
 也可以从 GitHub 装（版本由仓库 HEAD 决定，不跟随 npm 发布）：
 
@@ -55,7 +58,7 @@ and reload the page.
 - **列出 / 查看 / 删除 / 恢复 / 改名**：`/snippet list`、`/snippet show <名称>`、
   `/snippet rm <名称>`、`/snippet undo <名称>`、`/snippet mv <旧名> <新名>`。
   重名时不会瞎删，会列出候选让你用 `#id前缀` 精确指定。
-- **一键插入**：输入框下方「📋 片段库」按钮展开面板，按分类浏览，点击片段即插入当前
+- **一键插入**：输入框工具条上的「📋 片段库」按钮展开面板，按分类浏览，点击片段即插入当前
   草稿。插入失败（草稿在面板打开期间被改动、或输入框正在提交）会在面板内说明原因。
 - **面板内编辑 / 新建**：点 ✏️ 在原行下方展开编辑器，改名称、分类、正文，并直接维护
   变量（必填勾选 + 默认值）；面板底部「＋ 新建」同样在面板内完成创建，全程不用敲命令。
@@ -108,7 +111,7 @@ and reload the page.
   面板里点 🕘 展开该片段的历史，可回看历次正文；`/snippet show` 也会显示 revision 号。
 - **命令面板（全局快捷唤起）**：任意时刻按 `Ctrl+Shift+K`（或 `Ctrl+Shift+P`）弹出片段搜索
   浮层，输入关键字即时过滤（名称/分类/标签/正文），`↑` `↓` 选择、`Enter` 插入、`Esc` 关闭；
-  收藏片段自动置顶，无需先点开 dock 面板。选中后按 `Ctrl+Enter`（Mac `Cmd+Enter`）则是
+  收藏片段自动置顶，无需先点开片段库面板。选中后按 `Ctrl+Enter`（Mac `Cmd+Enter`）则是
   **插入并立即发送**；带必填占位符的片段仍需先填表单，无法直接发送。`↑` `↓` 切换选中项时
   列表自动滚动跟随，始终把选中项保持在可视区内。
 
@@ -130,7 +133,7 @@ and reload the page.
 /snippet import 我的片段.json
 ```
 
-然后在任意会话里，点击输入框下方的「📋 片段库」→ 点击片段名 → 内容插入草稿。
+然后在任意会话里，点击输入框工具条上的「📋 片段库」→ 点击片段名 → 内容插入草稿。
 要改内容或改分类，不必再敲命令：面板里点 ✏️ 直接改，改完点「保存」。
 
 ## 数据
@@ -184,7 +187,7 @@ and reload the page.
 ## 结构
 
 bundle 结构：host 半（`index.js`，命令 + RPC + JSON 存储）、client 半（`client.js`，
-输入框 dock 面板 UI）。
+输入框工具条面板 UI）。
 
 ```
 index.js            host 半：/snippet 命令 + /prompt-snippets RPC + JSON 持久化
