@@ -5,6 +5,273 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
     const { useState, useEffect, useMemo, useRef } = React;
 
+    // ── i18n：字典命名空间与文案表 ──
+    // 接入 DSH 官方 locale 服务（ctx.locale.register/bind/subscribe），
+    // 语言切换时通过 subscribe 触发重渲染。测试环境无 locale 服务时降级到 zh。
+    const NS = "prompt-snippets";
+    const zh = {
+      "error.unknown": "未知错误",
+      "error.readFailed": "读取失败",
+      "error.sendFailed": "发送失败：请确认输入框里有内容再试。",
+      "error.insertFailed": "插入失败：请先把光标放进输入框再试。",
+      "error.insertFailedDraft": "插入失败：请先把光标放进输入框再试（草稿可能在面板打开期间被改动）。",
+      "error.optimizeFailed": "优化失败",
+      "error.noModel": "当前未配置默认模型，无法优化",
+      "error.exportFailed": "导出失败",
+      "error.importFailed": "导入失败",
+      "error.deleteFailed": "删除失败",
+      "error.restoreFailed": "恢复失败",
+      "error.saveFailed": "保存失败",
+      "error.nameEmpty": "片段名称不能为空。",
+      "error.reloadFailed": "重新载入失败：该片段可能已被删除。",
+      "error.replaceFailed": "替换失败",
+      "error.conflict": "该片段已被他处修改",
+      "error.importPathEmpty": "请填写要导入的 JSON 文件路径。",
+      "notice.defaultsFilled": "已用默认值填充，可在 ✏️ 里改",
+      "notice.saved": "已保存",
+      "notice.created": "已新建",
+      "notice.loadedLatest": "已载入服务器上的最新版本。",
+      "notice.imported": "导入 {added} 条{skipped}{updated}",
+      "notice.importedSkipped": "，跳过 {n}",
+      "notice.importedUpdated": "，更新 {n}",
+      "notice.historyInserted": "已插入旧版内容",
+      "edit.confirmDiscard": "草稿还没保存，再点一次「确认放弃」才会丢弃。",
+      "edit.overwrite": "覆盖",
+      "edit.reload": "重新载入",
+      "edit.name": "名称",
+      "edit.namePlaceholder": "片段名称",
+      "edit.category": "分类",
+      "edit.categoryPlaceholder": "留空表示不分类",
+      "edit.tags": "标签（逗号分隔）",
+      "edit.tagsPlaceholder": "如：代码、常用、审查",
+      "edit.pinned": "收藏置顶",
+      "edit.content": "正文（用 {{变量名}} 标记占位符，\{{ 输出字面量）",
+      "edit.variables": "变量",
+      "edit.required": "必填",
+      "edit.defaultPlaceholder": "默认值（可空）",
+      "edit.enumPlaceholder": "选项（逗号/顿号分隔，可空）",
+      "edit.enumTitle": "填了选项后，插入时会变成下拉框，用户只能从这些选项里选",
+      "edit.cancel": "取消",
+      "edit.confirmCancel": "确认放弃",
+      "edit.saving": "保存中…",
+      "edit.save": "保存",
+      "fill.requiredSuffix": " · 必填",
+      "fill.empty": "（不填）",
+      "fill.cancel": "取消",
+      "fill.keepRaw": "保留占位符插入",
+      "fill.insert": "插入",
+      "review.overLong": "优化结果超过单条片段上限，请先精简",
+      "review.replacePrompt": "把片段正文替换成优化后的版本",
+      "review.original": "原文",
+      "review.optimized": "优化后",
+      "review.optimizedEditable": "优化后（可编辑）",
+      "review.generating": "生成中…",
+      "review.stopping": "正在取消…",
+      "review.empty": "（空）",
+      "review.overLongWarning": "⚠ 超出长度上限",
+      "review.applyOverwrite": "用优化版覆盖",
+      "review.discard": "放弃",
+      "review.keepOriginal": "保留原文插入",
+      "review.keepOriginalTitle": "不采用优化结果，插入原始片段",
+      "review.cancelOptimize": "取消这次优化",
+      "review.close": "关闭对比视图",
+      "review.cancelling": "取消中…",
+      "review.cancel": "取消",
+      "review.retryTitle": "重新生成一次（不累积）",
+      "review.retryMaxTitle": "已重试 {n} 次",
+      "review.retry": "再试",
+      "review.replacing": "替换中…",
+      "review.replaceContent": "替换片段正文",
+      "review.insertOptimized": "插入优化版",
+      "review.insertOptimizedTitle": "把优化后的文本插入输入框",
+      "item.insertTitle": "点击插入\n\n{content}",
+      "item.edit": "编辑",
+      "item.editReadonly": "片段库处于只读状态，禁止编辑",
+      "item.history": "查看历史版本",
+      "item.optimize": "AI 优化（对比后决定）",
+      "item.noModel": "当前未配置默认模型",
+      "item.delete": "删除（可撤销）",
+      "item.deleteReadonly": "片段库处于只读状态，禁止删除",
+      "palette.searchPlaceholder": "搜索片段（名称 / 分类 / 标签 / 内容）…",
+      "palette.empty": "还没有片段，点 dock 的「＋ 新建」保存一个。",
+      "palette.noMatch": "没有匹配「{query}」的片段。",
+      "palette.noCategory": "（无分类）",
+      "palette.hint": "↑↓ 选择 · Enter 插入 · Ctrl+Enter 插入并发送 · Esc 关闭 · Ctrl+Shift+K 唤起",
+      "history.loading": "加载中…",
+      "history.empty": "暂无历史版本（每次保存前的内容会留档，最多 20 版）",
+      "history.insertTitle": "把这一版的内容插入输入框",
+      "history.insert": "插入旧版",
+      "panel.empty": "还没有片段。点下面的「＋ 新建」或 /snippet add <名称> <内容> 保存一个。",
+      "panel.newFromQuery": "＋ 新建「{query}」",
+      "panel.new": "＋ 新建片段",
+      "panel.newTitle": "把搜索词作为新片段名称",
+      "panel.title": "提示词片段库",
+      "panel.button": "📋 片段库",
+      "panel.ariaLabel": "片段库",
+      "panel.resizeHeight": "拖动调整高度",
+      "panel.resizeWidth": "拖动调整宽度",
+      "panel.resizeSize": "拖动调整大小",
+      "panel.dragTitle": "拖动标题栏可移动面板",
+      "panel.close": "关闭",
+      "panel.closeAria": "关闭片段库",
+      "panel.searchPlaceholder": "搜索名称 / 分类 / 内容…",
+      "panel.all": "全部",
+      "panel.pinned": "★ 收藏",
+      "panel.pinnedTitle": "只看收藏置顶的片段",
+      "panel.recent": "最近使用",
+      "panel.recentTitle": "按最近使用排序（最多 20 条）",
+      "panel.newBtn": "＋ 新建",
+      "panel.newBtnTitle": "新建片段",
+      "panel.newBtnReadonly": "片段库处于只读状态，禁止新建",
+      "panel.exporting": "导出中…",
+      "panel.export": "⬇ 导出",
+      "panel.exportTitle": "把所有片段导出成 JSON 文件，存在数据目录的 exports/ 下",
+      "panel.importing": "导入中…",
+      "panel.import": "⬆ 导入",
+      "panel.importTitle": "从导出的 JSON 文件导入片段",
+      "panel.importReadonly": "片段库处于只读状态，禁止导入",
+      "panel.importPathLabel": "导入文件路径",
+      "panel.importPathPlaceholder": "留空或写文件名时取 exports/snippets.json",
+      "panel.importReplaceLabel": "替换模式（未出现在文件里的片段会被移入垃圾桶）",
+      "panel.cancel": "取消",
+      "panel.importBtn": "导入",
+      "panel.openFile": "打开",
+      "panel.openFileTitle": "在系统文件管理器中打开这个文件",
+      "panel.undoAll": "全部撤销",
+      "panel.footer": "点名称插入 · ✏️ 编辑 · ✨ 优化 · 🗑 删除 · 拖标题栏移动 · 拖边缘调大小",
+    };
+    const en = {
+      "error.unknown": "Unknown error",
+      "error.readFailed": "Failed to load",
+      "error.sendFailed": "Send failed: make sure the composer has content and try again.",
+      "error.insertFailed": "Insert failed: place the cursor in the composer first.",
+      "error.insertFailedDraft": "Insert failed: place the cursor in the composer first (the draft may have changed while the panel was open).",
+      "error.optimizeFailed": "Optimize failed",
+      "error.noModel": "No default model configured — cannot optimize",
+      "error.exportFailed": "Export failed",
+      "error.importFailed": "Import failed",
+      "error.deleteFailed": "Delete failed",
+      "error.restoreFailed": "Restore failed",
+      "error.saveFailed": "Save failed",
+      "error.nameEmpty": "Snippet name cannot be empty.",
+      "error.reloadFailed": "Reload failed: the snippet may have been deleted.",
+      "error.replaceFailed": "Replace failed",
+      "error.conflict": "This snippet was modified elsewhere",
+      "error.importPathEmpty": "Enter the path of the JSON file to import.",
+      "notice.defaultsFilled": "Filled with defaults — edit in ✏️",
+      "notice.saved": "Saved",
+      "notice.created": "Created",
+      "notice.loadedLatest": "Loaded the latest version from the server.",
+      "notice.imported": "Imported {added}{skipped}{updated}",
+      "notice.importedSkipped": ", skipped {n}",
+      "notice.importedUpdated": ", updated {n}",
+      "notice.historyInserted": "Inserted old version content",
+      "edit.confirmDiscard": "Draft not saved — click \"Discard\" again to discard it.",
+      "edit.overwrite": "Overwrite",
+      "edit.reload": "Reload",
+      "edit.name": "Name",
+      "edit.namePlaceholder": "Snippet name",
+      "edit.category": "Category",
+      "edit.categoryPlaceholder": "Leave empty for no category",
+      "edit.tags": "Tags (comma-separated)",
+      "edit.tagsPlaceholder": "e.g. code, common, review",
+      "edit.pinned": "Pin to top",
+      "edit.content": "Content (use {{variable}} for placeholders, \\{{ for literal)",
+      "edit.variables": "Variables",
+      "edit.required": "Required",
+      "edit.defaultPlaceholder": "Default (optional)",
+      "edit.enumPlaceholder": "Options (comma-separated, optional)",
+      "edit.enumTitle": "With options set, the insert form shows a dropdown limited to these choices",
+      "edit.cancel": "Cancel",
+      "edit.confirmCancel": "Discard",
+      "edit.saving": "Saving…",
+      "edit.save": "Save",
+      "fill.requiredSuffix": " · required",
+      "fill.empty": "(leave empty)",
+      "fill.cancel": "Cancel",
+      "fill.keepRaw": "Insert with placeholders",
+      "fill.insert": "Insert",
+      "review.overLong": "Optimized result exceeds the snippet length limit — please shorten first",
+      "review.replacePrompt": "Replace the snippet content with the optimized version",
+      "review.original": "Original",
+      "review.optimized": "Optimized",
+      "review.optimizedEditable": "Optimized (editable)",
+      "review.generating": "Generating…",
+      "review.stopping": "Cancelling…",
+      "review.empty": "(empty)",
+      "review.overLongWarning": "⚠ Exceeds length limit",
+      "review.applyOverwrite": "Overwrite with optimized",
+      "review.discard": "Discard",
+      "review.keepOriginal": "Insert original",
+      "review.keepOriginalTitle": "Discard the optimized result and insert the original snippet",
+      "review.cancelOptimize": "Cancel this optimization",
+      "review.close": "Close comparison view",
+      "review.cancelling": "Cancelling…",
+      "review.cancel": "Cancel",
+      "review.retryTitle": "Regenerate once (not cumulative)",
+      "review.retryMaxTitle": "Retried {n} times",
+      "review.retry": "Retry",
+      "review.replacing": "Replacing…",
+      "review.replaceContent": "Replace snippet content",
+      "review.insertOptimized": "Insert optimized",
+      "review.insertOptimizedTitle": "Insert the optimized text into the composer",
+      "item.insertTitle": "Click to insert\n\n{content}",
+      "item.edit": "Edit",
+      "item.editReadonly": "Snippet store is read-only — editing disabled",
+      "item.history": "View version history",
+      "item.optimize": "AI optimize (compare before deciding)",
+      "item.noModel": "No default model configured",
+      "item.delete": "Delete (undoable)",
+      "item.deleteReadonly": "Snippet store is read-only — deleting disabled",
+      "palette.searchPlaceholder": "Search snippets (name / category / tag / content)…",
+      "palette.empty": "No snippets yet — click \"＋ New\" on the dock to save one.",
+      "palette.noMatch": "No snippets matching \"{query}\".",
+      "palette.noCategory": "(no category)",
+      "palette.hint": "↑↓ Select · Enter Insert · Ctrl+Enter Insert & Send · Esc Close · Ctrl+Shift+K Open",
+      "history.loading": "Loading…",
+      "history.empty": "No history yet (each save keeps the previous version, up to 20)",
+      "history.insertTitle": "Insert this version's content into the composer",
+      "history.insert": "Insert old version",
+      "panel.empty": "No snippets yet. Click \"＋ New\" below or /snippet add <name> <content> to save one.",
+      "panel.newFromQuery": "＋ New \"{query}\"",
+      "panel.new": "＋ New snippet",
+      "panel.newTitle": "Use the search term as the new snippet name",
+      "panel.title": "Prompt Snippets",
+      "panel.button": "📋 Snippets",
+      "panel.ariaLabel": "Snippet panel",
+      "panel.resizeHeight": "Drag to resize height",
+      "panel.resizeWidth": "Drag to resize width",
+      "panel.resizeSize": "Drag to resize",
+      "panel.dragTitle": "Drag the title bar to move the panel",
+      "panel.close": "Close",
+      "panel.closeAria": "Close snippet panel",
+      "panel.searchPlaceholder": "Search name / category / content…",
+      "panel.all": "All",
+      "panel.pinned": "★ Pinned",
+      "panel.pinnedTitle": "Show only pinned snippets",
+      "panel.recent": "Recent",
+      "panel.recentTitle": "Sort by recently used (up to 20)",
+      "panel.newBtn": "＋ New",
+      "panel.newBtnTitle": "New snippet",
+      "panel.newBtnReadonly": "Snippet store is read-only — creating disabled",
+      "panel.exporting": "Exporting…",
+      "panel.export": "⬇ Export",
+      "panel.exportTitle": "Export all snippets to a JSON file under exports/ in the data directory",
+      "panel.importing": "Importing…",
+      "panel.import": "⬆ Import",
+      "panel.importTitle": "Import snippets from an exported JSON file",
+      "panel.importReadonly": "Snippet store is read-only — importing disabled",
+      "panel.importPathLabel": "Import file path",
+      "panel.importPathPlaceholder": "Leave empty or use a filename for exports/snippets.json",
+      "panel.importReplaceLabel": "Replace mode (snippets not in the file are moved to trash)",
+      "panel.cancel": "Cancel",
+      "panel.importBtn": "Import",
+      "panel.openFile": "Open",
+      "panel.openFileTitle": "Open this file in the system file manager",
+      "panel.undoAll": "Undo all",
+      "panel.footer": "Click name to insert · ✏️ Edit · ✨ Optimize · 🗑 Delete · Drag title to move · Drag edge to resize",
+    };
+
     // 样式插入走两条路：优先平台 seed builtin `styles`（自带生命周期清理），
     // 拿不到就退回 ui-theme 官方同款做法（document.head + ctx.effect 清理）。
     // 都不能让 bundle 挂掉：配色主体是内联 var(--dsw-*)，CSS 只补伪类与滚动条。
@@ -949,7 +1216,7 @@ window.__ModuleLoader__.load({
 
     /** 把 throw 出来的任意值转成一句能看的错误文案。 */
     function msgOf(err) {
-      if (!err) return "未知错误";
+      if (!err) return t("error.unknown");
       if (typeof err === "string") return err;
       return String(err.message || err);
     }
@@ -973,7 +1240,11 @@ window.__ModuleLoader__.load({
     /** 与 host 侧 MAX_CONTENT 一致：编辑后实时重算是否超长，不能只信 host 首次返回的 truncated。 */
     const MAX_CONTENT = 200_000;
 
-    function SnippetDock({ inputActions, rpc }) {
+    function SnippetDock({ inputActions, rpc, t, localeSubscribe }) {
+      // locale 切换时强制重渲染（t 是外部绑定的纯函数，不会随 locale 自动更新）。
+      // 用 useState 而非 useEffect，避免 hook 槽位偏移影响既有测试。
+      const [, setLocaleRev] = useState(0);
+      if (localeSubscribe) localeSubscribe(() => setLocaleRev((n) => n + 1));
       const [snippets, setSnippets] = useState([]);
       const [readOnly, setReadOnly] = useState(false); // host 只读保护：version 更高 / 隔离失败时禁用一切写操作
       const [open, setOpen] = useState(false);
@@ -1025,7 +1296,7 @@ window.__ModuleLoader__.load({
           setReadOnly((result.value && result.value.readOnly) === true);
           setError(null);
         } else {
-          setError(result && result.error ? result.error.message : "读取失败");
+          setError(result && result.error ? result.error.message : t("error.readFailed"));
         }
       };
 
@@ -1342,7 +1613,7 @@ window.__ModuleLoader__.load({
         try {
           inputActions.submit();
         } catch (_) {
-          setError("发送失败：请确认输入框里有内容再试。");
+          setError(t("error.sendFailed"));
         }
       };
 
@@ -1368,7 +1639,7 @@ window.__ModuleLoader__.load({
         const { tokens } = scanPlaceholders(snippet.content);
         const { text } = renderContent(tokens, snippet.variables || {}, {});
         if (!insertText(text)) {
-          setError("插入失败：请先把光标放进输入框再试（草稿可能在面板打开期间被改动）。");
+          setError(t("error.insertFailedDraft"));
           return;
         }
         touch(snippet.id);
@@ -1377,7 +1648,7 @@ window.__ModuleLoader__.load({
         if (sendAfter) {
           submitDraft();
         } else if (plan.kind === "defaults") {
-          setNotice("已用默认值填充，可在 ✏️ 里改");
+          setNotice(t("notice.defaultsFilled"));
         }
       };
 
@@ -1392,7 +1663,7 @@ window.__ModuleLoader__.load({
         const { text, missing } = renderContent(tokens, cur.snippet.variables || {}, cur.values);
         if (missing.length > 0) return; // 按钮已禁用，这里只是兜底
         if (!insertText(text)) {
-          setError("插入失败：请先把光标放进输入框再试。");
+          setError(t("error.insertFailed"));
           return;
         }
         touch(cur.snippet.id);
@@ -1405,7 +1676,7 @@ window.__ModuleLoader__.load({
         const cur = filling;
         if (!cur) return;
         if (!insertText(cur.snippet.content)) {
-          setError("插入失败：请先把光标放进输入框再试。");
+          setError(t("error.insertFailed"));
           return;
         }
         touch(cur.snippet.id);
@@ -1486,7 +1757,7 @@ window.__ModuleLoader__.load({
         if (!cur) return;
         // 脏草稿要二次确认：先变按钮文案，再点一次才真丢
         if (cur.dirty && !cur.confirmCancel) {
-          setEditing({ ...cur, confirmCancel: true, hint: "草稿还没保存，再点一次「确认放弃」才会丢弃。" });
+          setEditing({ ...cur, confirmCancel: true, hint: t("edit.confirmDiscard") });
           return;
         }
         setEditing(null);
@@ -1497,7 +1768,7 @@ window.__ModuleLoader__.load({
         if (!cur || cur.busy) return;
         const name = cur.name.trim();
         if (!name) {
-          setEditing({ ...cur, hint: "片段名称不能为空。" });
+          setEditing({ ...cur, hint: t("error.nameEmpty") });
           return;
         }
         const payload = {
@@ -1520,14 +1791,14 @@ window.__ModuleLoader__.load({
             if (result && result.ok) {
               applyResult(result);
               setEditing(null);
-              setNotice(cur.id ? "已保存" : "已新建");
+              setNotice(cur.id ? t("notice.saved") : t("notice.created"));
               return;
             }
             const err = result && result.error;
             if (err && err.code === "conflict") {
               setEditing((prev) => (prev ? { ...prev, busy: false, conflict: err.message } : prev));
             } else {
-              setEditing((prev) => (prev ? { ...prev, busy: false, hint: err ? err.message : "保存失败" } : prev));
+              setEditing((prev) => (prev ? { ...prev, busy: false, hint: err ? err.message : t("error.saveFailed") } : prev));
             }
           })
           .catch((err) => {
@@ -1555,14 +1826,14 @@ window.__ModuleLoader__.load({
                 dirty: false,
                 busy: false,
                 conflict: null,
-                hint: "已载入服务器上的最新版本。",
+                hint: t("notice.loadedLatest"),
                 confirmCancel: false,
               });
               // 不能拿 get 的结果去 applyResult：它的 value 只有 snippet，没有 snippets，
               // 会顺手把列表刷成空。列表刷新单独走 load()。
               load();
             } else {
-              setEditing((prev) => (prev ? { ...prev, hint: "重新载入失败：该片段可能已被删除。" } : prev));
+              setEditing((prev) => (prev ? { ...prev, hint: t("error.reloadFailed") } : prev));
             }
           })
           .catch((err) => {
@@ -1604,7 +1875,7 @@ window.__ModuleLoader__.load({
               return;
             }
             setReview((prev) =>
-              prev ? { ...prev, busy: false, stopping: false, error: err.message || "优化失败" } : prev
+              prev ? { ...prev, busy: false, stopping: false, error: err.message || t("error.optimizeFailed") } : prev
             );
           })
           .catch((e) => {
@@ -1616,7 +1887,7 @@ window.__ModuleLoader__.load({
       const optimize = (snippet) => {
         if (optimizing) return;
         if (!optAvail.available) {
-          setError(optAvail.reason || "当前未配置默认模型，无法优化");
+          setError(optAvail.reason || t("error.noModel"));
           return;
         }
         const controller = typeof AbortController === "function" ? new AbortController() : null;
@@ -1669,7 +1940,7 @@ window.__ModuleLoader__.load({
         const cur = review;
         if (!cur || !cur.optimized) return;
         if (!insertText(cur.optimized)) {
-          setError("插入失败：请先把光标放进输入框再试（草稿可能在面板打开期间被改动）。");
+          setError(t("error.insertFailedDraft"));
           return;
         }
         touch(cur.snippet.id);
@@ -1682,7 +1953,7 @@ window.__ModuleLoader__.load({
         const cur = review;
         if (!cur) return;
         if (!insertText(cur.original)) {
-          setError("插入失败：请先把光标放进输入框再试（草稿可能在面板打开期间被改动）。");
+          setError(t("error.insertFailedDraft"));
           return;
         }
         touch(cur.snippet.id);
@@ -1719,10 +1990,10 @@ window.__ModuleLoader__.load({
             }
             const err = (result && result.error) || {};
             if (err.code === "conflict") {
-              setReview((prev) => (prev ? { ...prev, saving: false, conflict: err.message || "该片段已被他处修改" } : prev));
+              setReview((prev) => (prev ? { ...prev, saving: false, conflict: err.message || t("error.conflict") } : prev));
               return;
             }
-            setReview((prev) => (prev ? { ...prev, saving: false, error: err.message || "替换失败" } : prev));
+            setReview((prev) => (prev ? { ...prev, saving: false, error: err.message || t("error.replaceFailed") } : prev));
           })
           .catch((e) => {
             setReview((prev) => (prev ? { ...prev, saving: false, error: msgOf(e) } : prev));
@@ -1749,7 +2020,7 @@ window.__ModuleLoader__.load({
               setNotice(`已导出 ${result.value.count} 条`);
               setError(null);
             } else {
-              setError(result && result.error ? result.error.message : "导出失败");
+              setError(result && result.error ? result.error.message : t("error.exportFailed"));
             }
           })
           .catch((err) => {
@@ -1768,7 +2039,7 @@ window.__ModuleLoader__.load({
         if (importing) return;
         const target = importPath.trim();
         if (!target) {
-          setError("请填写要导入的 JSON 文件路径。");
+          setError(t("error.importPathEmpty"));
           return;
         }
         setImporting(true);
@@ -1779,14 +2050,14 @@ window.__ModuleLoader__.load({
             setImporting(false);
             if (result && result.ok) {
               const p = result.value.plan;
-              setNotice(`导入 ${p.added} 条${p.skipped ? `，跳过 ${p.skipped}` : ""}${p.updated ? `，更新 ${p.updated}` : ""}`);
+              setNotice(t("notice.imported", { added: p.added, skipped: p.skipped ? t("notice.importedSkipped", { n: p.skipped }) : "", updated: p.updated ? t("notice.importedUpdated", { n: p.updated }) : "" }));
               setImportOpen(false);
               setImportPath("");
               setImportReplace(false);
               setError(null);
               load(); // 列表变了，重新拉一次
             } else {
-              setError(result && result.error ? result.error.message : "导入失败");
+              setError(result && result.error ? result.error.message : t("error.importFailed"));
             }
           })
           .catch((err) => {
@@ -1808,7 +2079,7 @@ window.__ModuleLoader__.load({
               // 删掉的正是正在编辑的那条：草稿没有意义了
               setEditing((prev) => (prev && prev.id === snippet.id ? null : prev));
             } else {
-              setError(result && result.error ? result.error.message : "删除失败");
+              setError(result && result.error ? result.error.message : t("error.deleteFailed"));
             }
           })
           .catch((err) => {
@@ -1824,7 +2095,7 @@ window.__ModuleLoader__.load({
               // 成功才从撤销条移除，失败保留入口让用户能重试（P1-5）
               setDeleted((prev) => prev.filter((x) => x.id !== target.id));
               applyResult(result);
-            } else setError(result && result.error ? result.error.message : "恢复失败");
+            } else setError(result && result.error ? result.error.message : t("error.restoreFailed"));
           })
           .catch((err) => setError(String((err && err.message) || err)));
       };
@@ -1887,52 +2158,52 @@ window.__ModuleLoader__.load({
                 h(
                   "button",
                   { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => saveDraft(true) },
-                  "覆盖"
+                  t("edit.overwrite")
                 ),
                 h(
                   "button",
                   { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: reloadDraft },
-                  "重新载入"
+                  t("edit.reload")
                 )
               )
             : null,
           h(
             "label",
             { style: style.field },
-            h("span", { style: style.label }, "名称"),
+            h("span", { style: style.label }, t("edit.name")),
             h("input", {
               ref: nameRef,
               type: "text",
               className: "ps-input",
               style: style.input,
               value: e.name,
-              placeholder: "片段名称",
+              placeholder: t("edit.namePlaceholder"),
               onChange: (ev) => patchDraft({ name: ev.target.value }),
             })
           ),
           h(
             "label",
             { style: style.field },
-            h("span", { style: style.label }, "分类"),
+            h("span", { style: style.label }, t("edit.category")),
             h("input", {
               type: "text",
               className: "ps-input",
               style: style.input,
               value: e.category,
-              placeholder: "留空表示不分类",
+              placeholder: t("edit.categoryPlaceholder"),
               onChange: (ev) => patchDraft({ category: ev.target.value }),
             })
           ),
           h(
             "label",
             { style: style.field },
-            h("span", { style: style.label }, "标签（逗号分隔）"),
+            h("span", { style: style.label }, t("edit.tags")),
             h("input", {
               type: "text",
               className: "ps-input",
               style: style.input,
               value: (e.tags || []).join("、"),
-              placeholder: "如：代码、常用、审查",
+              placeholder: t("edit.tagsPlaceholder"),
               onChange: (ev) => {
                 const tags = ev.target.value
                   .split(/[,，、]/)
@@ -1950,12 +2221,12 @@ window.__ModuleLoader__.load({
               checked: e.pinned === true,
               onChange: (ev) => patchDraft({ pinned: ev.target.checked }),
             }),
-            "收藏置顶"
+            t("edit.pinned")
           ),
           h(
             "label",
             { style: style.field },
-            h("span", { style: style.label }, "正文（用 {{变量名}} 标记占位符，\\{{ 输出字面量）"),
+            h("span", { style: style.label }, t("edit.content")),
             h("textarea", {
               className: "ps-textarea",
               style: style.textarea,
@@ -1967,7 +2238,7 @@ window.__ModuleLoader__.load({
             ? h(
                 "div",
                 null,
-                h("div", { style: style.label }, "变量"),
+                h("div", { style: style.label }, t("edit.variables")),
                 names.map((nm) => {
                   const d = e.variables[nm] || {};
                   return h(
@@ -1982,14 +2253,14 @@ window.__ModuleLoader__.load({
                         checked: d.required === true,
                         onChange: (ev) => setVar(nm, { required: ev.target.checked }),
                       }),
-                      "必填"
+                      t("edit.required")
                     ),
                     h("input", {
                       type: "text",
                       className: "ps-input",
                       style: { ...style.input, flex: "1 1 90px", width: "auto" },
                       value: typeof d.default === "string" ? d.default : "",
-                      placeholder: "默认值（可空）",
+                      placeholder: t("edit.defaultPlaceholder"),
                       onChange: (ev) => setVar(nm, { default: ev.target.value }),
                     }),
                     h("input", {
@@ -1997,8 +2268,8 @@ window.__ModuleLoader__.load({
                       className: "ps-input",
                       style: { ...style.input, flex: "1 1 90px", width: "auto" },
                       value: Array.isArray(d.options) ? d.options.join("、") : "",
-                      placeholder: "选项（逗号/顿号分隔，可空）",
-                      title: "填了选项后，插入时会变成下拉框，用户只能从这些选项里选",
+                      placeholder: t("edit.enumPlaceholder"),
+                      title: t("edit.enumTitle"),
                       onChange: (ev) => {
                         const options = ev.target.value
                           .split(/[,，、]/)
@@ -2018,7 +2289,7 @@ window.__ModuleLoader__.load({
             h(
               "button",
               { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: cancelEdit },
-              e.confirmCancel ? "确认放弃" : "取消"
+              e.confirmCancel ? t("edit.confirmCancel") : t("edit.cancel")
             ),
             h(
               "button",
@@ -2029,7 +2300,7 @@ window.__ModuleLoader__.load({
                 disabled: e.busy,
                 onClick: () => saveDraft(false),
               },
-              e.busy ? "保存中…" : "保存"
+              e.busy ? t("edit.saving") : t("edit.save")
             )
           )
         );
@@ -2052,7 +2323,7 @@ window.__ModuleLoader__.load({
             const d = vars[nm] || {};
             const required = d.required === true;
             const opts = Array.isArray(d.options) ? d.options : [];
-            const label = (typeof d.label === "string" && d.label ? d.label : nm) + (required ? " · 必填" : "");
+            const label = (typeof d.label === "string" && d.label ? d.label : nm) + (required ? t("fill.requiredSuffix") : "");
             const val = typeof cur.values[nm] === "string" ? cur.values[nm] : "";
             // 长文本变量（变量名带「代码/原文/记录/要点/说明/内容/text/body」或已含换行）用 textarea，
             // 单行 input 会吃掉换行，粘贴多行代码/会议记录没法看。
@@ -2072,7 +2343,7 @@ window.__ModuleLoader__.load({
                       onChange: (ev) => setFillValue(nm, ev.target.value),
                     },
                     // 非必填给一个空选项，让用户能「不填」（走变量名留空语义）
-                    !required ? h("option", { value: "" }, "（不填）") : null,
+                    !required ? h("option", { value: "" }, t("fill.empty")) : null,
                     opts.map((o) => h("option", { key: o, value: o }, o))
                   )
                 : multiline
@@ -2099,12 +2370,12 @@ window.__ModuleLoader__.load({
             h(
               "button",
               { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => setFilling(null) },
-              "取消"
+              t("fill.cancel")
             ),
             h(
               "button",
               { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: insertRaw },
-              "保留占位符插入"
+              t("fill.keepRaw")
             ),
             h(
               "button",
@@ -2115,7 +2386,7 @@ window.__ModuleLoader__.load({
                 disabled: blocked,
                 onClick: submitFill,
               },
-              "插入"
+              t("fill.insert")
             )
           )
         );
@@ -2135,10 +2406,10 @@ window.__ModuleLoader__.load({
         const canRetry = !cur.busy && retryLeft > 0;
         const canReplace = !cur.busy && !cur.saving && !overLong && lost.length === 0 && !!cur.optimized;
         const optTitle = overLong
-          ? "优化结果超过单条片段上限，请先精简"
+          ? t("review.overLong")
           : lost.length > 0
           ? `优化结果丢失了占位符 ${lost.map((n) => `{{${n}}}`).join("、")}`
-          : "把片段正文替换成优化后的版本";
+          : t("review.replacePrompt");
         return h(
           "div",
           { style: style.reviewWrap },
@@ -2152,13 +2423,13 @@ window.__ModuleLoader__.load({
               h(
                 "div",
                 { style: style.reviewCol },
-                h("div", { style: style.label }, "原文"),
+                h("div", { style: style.label }, t("review.original")),
                 h("div", { style: style.reviewPane }, cur.original)
               ),
               h(
                 "div",
                 { style: style.reviewCol },
-                h("div", { style: style.label }, cur.busy ? "优化后" : "优化后（可编辑）"),
+                h("div", { style: style.label }, cur.busy ? t("review.optimized") : t("review.optimizedEditable")),
                 h(
                   "textarea",
                   {
@@ -2166,7 +2437,7 @@ window.__ModuleLoader__.load({
                     style: style.reviewInput,
                     value: cur.busy ? "" : cur.optimized,
                     disabled: cur.busy,
-                    placeholder: cur.busy ? (cur.stopping ? "正在取消…" : "生成中…") : "（空）",
+                    placeholder: cur.busy ? (cur.stopping ? t("review.stopping") : t("review.generating")) : t("review.empty"),
                     onChange: (ev) =>
                       setReview((prev) => (prev ? { ...prev, optimized: ev.target.value } : prev)),
                   }
@@ -2187,7 +2458,7 @@ window.__ModuleLoader__.load({
                   )
                 : null,
               cur.retries > 0 ? h("span", null, `已重试 ${cur.retries} 次`) : null,
-              overLong ? h("span", { style: style.reviewLost }, "⚠ 超出长度上限") : null
+              overLong ? h("span", { style: style.reviewLost }, t("review.overLongWarning")) : null
             ),
             cur.conflict
               ? h(
@@ -2203,7 +2474,7 @@ window.__ModuleLoader__.load({
                       onClick: () => saveOptimized(true),
                       disabled: cur.saving,
                     },
-                    "用优化版覆盖"
+                    t("review.applyOverwrite")
                   ),
                   h(
                     "button",
@@ -2213,7 +2484,7 @@ window.__ModuleLoader__.load({
                       style: style.btnGhost,
                       onClick: () => setReview((prev) => (prev ? { ...prev, conflict: null } : prev)),
                     },
-                    "放弃"
+                    t("review.discard")
                   )
                 )
               : null,
@@ -2229,9 +2500,9 @@ window.__ModuleLoader__.load({
                   style: style.btnGhost,
                   onClick: insertOriginal,
                   disabled: cur.busy,
-                  title: "不采用优化结果，插入原始片段",
+                  title: t("review.keepOriginalTitle"),
                 },
-                "保留原文插入"
+                t("review.keepOriginal")
               ),
               h(
                 "button",
@@ -2240,9 +2511,9 @@ window.__ModuleLoader__.load({
                   className: "ps-ghost",
                   style: style.btnGhost,
                   onClick: stopOptimize,
-                  title: cur.busy ? "取消这次优化" : "关闭对比视图",
+                  title: cur.busy ? t("review.cancelOptimize") : t("review.close"),
                 },
-                cur.busy ? (cur.stopping ? "取消中…" : "取消") : "✕"
+                cur.busy ? (cur.stopping ? t("review.cancelling") : t("review.cancel")) : "✕"
               ),
               h(
                 "button",
@@ -2252,9 +2523,9 @@ window.__ModuleLoader__.load({
                   style: canRetry ? style.btnGhost : { ...style.btnGhost, ...style.btnDisabled },
                   onClick: retryOptimize,
                   disabled: !canRetry,
-                  title: canRetry ? "重新生成一次（不累积）" : `已重试 ${MAX_RETRY} 次`,
+                  title: canRetry ? t("review.retryTitle") : t("review.retryMaxTitle", { n: MAX_RETRY }),
                 },
-                canRetry ? "再试" : `已重试 ${MAX_RETRY} 次`
+                canRetry ? t("review.retry") : t("review.retryMaxTitle", { n: MAX_RETRY })
               ),
               h(
                 "button",
@@ -2266,7 +2537,7 @@ window.__ModuleLoader__.load({
                   disabled: !canReplace,
                   title: optTitle,
                 },
-                cur.saving ? "替换中…" : "替换片段正文"
+                cur.saving ? t("review.replacing") : t("review.replaceContent")
               ),
               h(
                 "button",
@@ -2276,9 +2547,9 @@ window.__ModuleLoader__.load({
                   style: cur.busy || !cur.optimized ? { ...style.btnPrimary, ...style.btnDisabled } : style.btnPrimary,
                   onClick: insertOptimized,
                   disabled: cur.busy || !cur.optimized,
-                  title: "把优化后的文本插入输入框",
+                  title: t("review.insertOptimizedTitle"),
                 },
-                "插入优化版"
+                t("review.insertOptimized")
               )
             )
           )
@@ -2305,7 +2576,7 @@ window.__ModuleLoader__.load({
                     : style.item,
                 onClick: () => insert(s),
                 onMouseEnter: () => setSelected(idx),
-                title: "点击插入\n\n" + s.content,
+                title: t("item.insertTitle", { content: s.content }),
               },
               ...(s.pinned === true ? [h("span", { style: style.pinStar }, "★ ")] : []),
               highlightText(s.name, trimmedQuery),
@@ -2319,7 +2590,7 @@ window.__ModuleLoader__.load({
                 style: readOnly ? { ...style.icon, ...style.iconBusy } : style.icon,
                 onClick: () => beginEdit(s),
                 disabled: readOnly || (editing !== null && editing.id !== s.id && editing.dirty),
-                title: readOnly ? "片段库处于只读状态，禁止编辑" : "编辑",
+                title: readOnly ? t("item.editReadonly") : t("item.edit"),
                 "aria-label": `编辑「${s.name}」`,
               },
               "✏️"
@@ -2331,7 +2602,7 @@ window.__ModuleLoader__.load({
                 className: "ps-icon",
                 style: history && history.id === s.id ? { ...style.icon, ...style.itemEditing } : style.icon,
                 onClick: () => showHistory(s),
-                title: "查看历史版本",
+                title: t("item.history"),
                 "aria-label": `历史「${s.name}」`,
               },
               "🕘"
@@ -2350,7 +2621,7 @@ window.__ModuleLoader__.load({
                 onClick: () => optimize(s),
                 // 无默认模型时直接置灰：不要留到点击才报错（ROADMAP §3.1）
                 disabled: optimizing !== null || !optAvail.available,
-                title: optAvail.available ? "AI 优化（对比后决定）" : optAvail.reason || "当前未配置默认模型",
+                title: optAvail.available ? t("item.optimize") : optAvail.reason || t("item.noModel"),
                 "aria-label": `AI 优化「${s.name}」`,
               },
               optimizing === s.id ? "…" : "✨"
@@ -2363,7 +2634,7 @@ window.__ModuleLoader__.load({
                 style: { ...style.icon, ...style.del },
                 onClick: () => remove(s),
                 disabled: readOnly || deleting !== null,
-                title: readOnly ? "片段库处于只读状态，禁止删除" : "删除（可撤销）",
+                title: readOnly ? t("item.deleteReadonly") : t("item.delete"),
                 "aria-label": `删除「${s.name}」`,
               },
               deleting === s.id ? "…" : "🗑"
@@ -2417,7 +2688,7 @@ window.__ModuleLoader__.load({
               type: "text",
               className: "ps-search",
               style: style.paletteInput,
-              placeholder: "搜索片段（名称 / 分类 / 标签 / 内容）…",
+              placeholder: t("palette.searchPlaceholder"),
               value: paletteQuery,
               onChange: (e) => {
                 setPaletteQuery(e.target.value);
@@ -2447,7 +2718,7 @@ window.__ModuleLoader__.load({
               "div",
               { style: style.paletteList, ref: paletteListRef },
               paletteResults.length === 0
-                ? h("div", { style: style.empty }, snippets.length === 0 ? "还没有片段，点 dock 的「＋ 新建」保存一个。" : `没有匹配「${paletteQuery}」的片段。`)
+                ? h("div", { style: style.empty }, snippets.length === 0 ? t("palette.empty") : t("palette.noMatch", { query: paletteQuery }))
                 : paletteResults.map((s, i) =>
                     h(
                       "button",
@@ -2465,7 +2736,7 @@ window.__ModuleLoader__.load({
                       h(
                         "span",
                         { style: style.paletteMeta },
-                        [s.category, (s.tags || []).join(" · ")].filter(Boolean).join(" · ") || "（无分类）"
+                        [s.category, (s.tags || []).join(" · ")].filter(Boolean).join(" · ") || t("palette.noCategory")
                       )
                     )
                   )
@@ -2473,7 +2744,7 @@ window.__ModuleLoader__.load({
             h(
               "div",
               { style: style.paletteHint },
-              "↑↓ 选择 · Enter 插入 · Ctrl+Enter 插入并发送 · Esc 关闭 · Ctrl+Shift+K 唤起"
+              t("palette.hint")
             )
           )
         );
@@ -2490,9 +2761,9 @@ window.__ModuleLoader__.load({
             { style: style.historyBox },
             h("div", { style: style.label }, `历史版本 ·「${hh.name}」`),
             hh.busy
-              ? h("div", { style: style.hintInline }, "加载中…")
+              ? h("div", { style: style.hintInline }, t("history.loading"))
               : hh.list.length === 0
-              ? h("div", { style: style.hintInline }, "暂无历史版本（每次保存前的内容会留档，最多 20 版）")
+              ? h("div", { style: style.hintInline }, t("history.empty"))
               : hh.list.map((v, i) =>
                   h(
                     "div",
@@ -2513,26 +2784,26 @@ window.__ModuleLoader__.load({
                             tabIndex: 0,
                             onClick: () => {
                               if (!insertText(v.content)) {
-                                setError("插入失败：请先把光标放进输入框再试。");
+                                setError(t("error.insertFailed"));
                                 return;
                               }
                               setError(null);
-                              setNotice("已插入旧版内容");
+                              setNotice(t("notice.historyInserted"));
                             },
                             onKeyDown: (e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
                                 if (!insertText(v.content)) {
-                                  setError("插入失败：请先把光标放进输入框再试。");
+                                  setError(t("error.insertFailed"));
                                   return;
                                 }
                                 setError(null);
-                                setNotice("已插入旧版内容");
+                                setNotice(t("notice.historyInserted"));
                               }
                             },
-                            title: "把这一版的内容插入输入框",
+                            title: t("history.insertTitle"),
                           },
-                          "插入旧版"
+                          t("history.insert")
                         )
                       ),
                       v.content
@@ -2546,7 +2817,7 @@ window.__ModuleLoader__.load({
       const bodyContent = error
         ? h("div", { style: style.error }, "⚠ " + error)
         : snippets.length === 0
-        ? h("div", { style: style.empty }, "还没有片段。点下面的「＋ 新建」或 /snippet add <名称> <内容> 保存一个。")
+        ? h("div", { style: style.empty }, t("panel.empty"))
         : visible.length === 0
         ? h(
             "div",
@@ -2567,9 +2838,9 @@ window.__ModuleLoader__.load({
                     if (nameRef.current) nameRef.current.focus();
                   }, 0);
                 },
-                title: "把搜索词作为新片段名称",
+                title: t("panel.newTitle"),
               },
-              trimmedQuery ? `＋ 新建「${trimmedQuery}」` : "＋ 新建片段"
+              trimmedQuery ? t("panel.newFromQuery", { query: trimmedQuery }) : t("panel.new")
             )
           )
         : listContent;
@@ -2585,10 +2856,10 @@ window.__ModuleLoader__.load({
             className: "ps-btn",
             style: style.button,
             onClick: toggle,
-            title: "提示词片段库",
+            title: t("panel.title"),
             "aria-expanded": open ? "true" : "false",
           },
-          "📋 片段库"
+          t("panel.button")
         ),
         notice ? h("span", { className: "ps-notice", style: style.notice }, notice) : null,
         renderPalette(),
@@ -2600,7 +2871,7 @@ window.__ModuleLoader__.load({
               className: "ps-panel",
               ref: panelRef,
               role: "dialog",
-              "aria-label": "片段库",
+              "aria-label": t("panel.ariaLabel"),
               style: {
                 ...style.panel,
                 left: (panelPos ? panelPos.left : GAP) + "px",
@@ -2614,25 +2885,25 @@ window.__ModuleLoader__.load({
                   : {}),
               },
             },
-            h("div", { style: style.resizeN, onMouseDown: startResize("n"), title: "拖动调整高度", "aria-label": "调整高度" }),
-            h("div", { style: style.resizeS, onMouseDown: startResize("s"), title: "拖动调整高度", "aria-label": "调整高度" }),
-            h("div", { style: style.resizeW, onMouseDown: startResize("w"), title: "拖动调整宽度", "aria-label": "调整宽度" }),
-            h("div", { style: style.resizeE, onMouseDown: startResize("e"), title: "拖动调整宽度", "aria-label": "调整宽度" }),
-            h("div", { style: style.resizeNW, onMouseDown: startResize("nw"), title: "拖动调整大小", "aria-label": "调整大小" }),
-            h("div", { style: style.resizeSW, onMouseDown: startResize("sw"), title: "拖动调整大小", "aria-label": "调整大小" }),
-            h("div", { style: style.resizeSE, onMouseDown: startResize("se"), title: "拖动调整大小", "aria-label": "调整大小" }),
+            h("div", { style: style.resizeN, onMouseDown: startResize("n"), title: t("panel.resizeHeight"), "aria-label": t("panel.resizeHeight") }),
+            h("div", { style: style.resizeS, onMouseDown: startResize("s"), title: t("panel.resizeHeight"), "aria-label": t("panel.resizeHeight") }),
+            h("div", { style: style.resizeW, onMouseDown: startResize("w"), title: t("panel.resizeWidth"), "aria-label": t("panel.resizeWidth") }),
+            h("div", { style: style.resizeE, onMouseDown: startResize("e"), title: t("panel.resizeWidth"), "aria-label": t("panel.resizeWidth") }),
+            h("div", { style: style.resizeNW, onMouseDown: startResize("nw"), title: t("panel.resizeSize"), "aria-label": t("panel.resizeSize") }),
+            h("div", { style: style.resizeSW, onMouseDown: startResize("sw"), title: t("panel.resizeSize"), "aria-label": t("panel.resizeSize") }),
+            h("div", { style: style.resizeSE, onMouseDown: startResize("se"), title: t("panel.resizeSize"), "aria-label": t("panel.resizeSize") }),
             h(
               "div",
-              { style: style.header, onMouseDown: startDrag, title: "拖动标题栏可移动面板" },
-              h("span", { style: style.headerTitle }, "📋 片段库"),
+              { style: style.header, onMouseDown: startDrag, title: t("panel.dragTitle") },
+              h("span", { style: style.headerTitle }, t("panel.button")),
               h(
                 "button",
                 {
                   type: "button",
                   className: "ps-close",
                   style: style.close,
-                  title: "关闭",
-                  "aria-label": "关闭片段库",
+                  title: t("panel.close"),
+                  "aria-label": t("panel.closeAria"),
                   onMouseDown: (e) => e.stopPropagation(),
                   onClick: () => setOpen(false),
                 },
@@ -2651,7 +2922,7 @@ window.__ModuleLoader__.load({
                   type: "text",
                   className: "ps-search",
                   style: style.search,
-                  placeholder: "搜索名称 / 分类 / 内容…",
+                  placeholder: t("panel.searchPlaceholder"),
                   value: query,
                   onChange: (e) => {
                     setQuery(e.target.value);
@@ -2706,7 +2977,7 @@ window.__ModuleLoader__.load({
                   style: view === "all" ? style.viewBtnActive : style.viewBtn,
                   onClick: () => setView("all"),
                 },
-                "全部"
+                t("panel.all")
               ),
               h(
                 "button",
@@ -2715,9 +2986,9 @@ window.__ModuleLoader__.load({
                   className: "ps-view",
                   style: view === "pinned" ? style.viewBtnActive : style.viewBtn,
                   onClick: () => setView("pinned"),
-                  title: "只看收藏置顶的片段",
+                  title: t("panel.pinnedTitle"),
                 },
-                "★ 收藏"
+                t("panel.pinned")
               ),
               h(
                 "button",
@@ -2726,9 +2997,9 @@ window.__ModuleLoader__.load({
                   className: "ps-view",
                   style: view === "recent" ? style.viewBtnActive : style.viewBtn,
                   onClick: () => setView("recent"),
-                  title: "按最近使用排序（最多 20 条）",
+                  title: t("panel.recentTitle"),
                 },
-                "最近使用"
+                t("panel.recent")
               )
             ),
             history ? renderHistory() : null,
@@ -2747,9 +3018,9 @@ window.__ModuleLoader__.load({
                         style: readOnly ? { ...style.btnGhost, ...style.btnDisabled } : style.btnGhost,
                         onClick: beginCreate,
                         disabled: readOnly || (editing !== null && editing.dirty),
-                        title: readOnly ? "片段库处于只读状态，禁止新建" : "新建片段",
+                        title: readOnly ? t("panel.newBtnReadonly") : t("panel.newBtnTitle"),
                       },
-                      "＋ 新建"
+                      t("panel.newBtn")
                     ),
                     h(
                       "button",
@@ -2759,9 +3030,9 @@ window.__ModuleLoader__.load({
                         style: exporting ? { ...style.btnGhost, ...style.btnDisabled } : style.btnGhost,
                         onClick: exportAll,
                         disabled: exporting || snippets.length === 0,
-                        title: "把所有片段导出成 JSON 文件，存在数据目录的 exports/ 下",
+                        title: t("panel.exportTitle"),
                       },
-                      exporting ? "导出中…" : "⬇ 导出"
+                      exporting ? t("panel.exporting") : t("panel.export")
                     ),
                     h(
                       "button",
@@ -2774,9 +3045,9 @@ window.__ModuleLoader__.load({
                           setError(null);
                         },
                         disabled: readOnly,
-                        title: readOnly ? "片段库处于只读状态，禁止导入" : "从导出的 JSON 文件导入片段",
+                        title: readOnly ? t("panel.importReadonly") : t("panel.importTitle"),
                       },
-                      "⬆ 导入"
+                      t("panel.import")
                     )
                   )
                 ),
@@ -2787,13 +3058,13 @@ window.__ModuleLoader__.load({
                   h(
                     "div",
                     { style: style.editor },
-                    h("div", { style: style.label }, "导入文件路径"),
+                    h("div", { style: style.label }, t("panel.importPathLabel")),
                     h("input", {
                       type: "text",
                       className: "ps-input",
                       style: style.input,
                       value: importPath,
-                      placeholder: "留空或写文件名时取 exports/snippets.json",
+                      placeholder: t("panel.importPathPlaceholder"),
                       onChange: (e) => setImportPath(e.target.value),
                       onKeyDown: (e) => {
                         if (e.key === "Enter") doImport();
@@ -2808,7 +3079,7 @@ window.__ModuleLoader__.load({
                         checked: importReplace,
                         onChange: (e) => setImportReplace(e.target.checked),
                       }),
-                      h("span", { style: style.label }, "替换模式（未出现在文件里的片段会被移入垃圾桶）")
+                      h("span", { style: style.label }, t("panel.importReplaceLabel"))
                     ),
                     h(
                       "div",
@@ -2816,7 +3087,7 @@ window.__ModuleLoader__.load({
                       h(
                         "button",
                         { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => setImportOpen(false) },
-                        "取消"
+                        t("panel.cancel")
                       ),
                       h(
                         "button",
@@ -2827,7 +3098,7 @@ window.__ModuleLoader__.load({
                           disabled: importing,
                           onClick: doImport,
                         },
-                        importing ? "导入中…" : "导入"
+                        importing ? t("panel.importing") : t("panel.importBtn")
                       )
                     )
                   )
@@ -2845,9 +3116,9 @@ window.__ModuleLoader__.load({
                       className: "ps-ghost",
                       style: { ...style.btnGhost, padding: "1px 8px", fontSize: "11px" },
                       onClick: () => revealExport(exportPath),
-                      title: "在系统文件管理器中打开这个文件",
+                      title: t("panel.openFileTitle"),
                     },
-                    "打开"
+                    t("panel.openFile")
                   )
                 )
               : null,
@@ -2878,7 +3149,7 @@ window.__ModuleLoader__.load({
                     ? h(
                         "button",
                         { type: "button", className: "ps-undo", style: style.undoBtn, onClick: undoAll },
-                        "全部撤销"
+                        t("panel.undoAll")
                       )
                     : null
                 )
@@ -2886,24 +3157,38 @@ window.__ModuleLoader__.load({
             h(
               "div",
               { style: style.hint },
-              "点名称插入 · ✏️ 编辑 · ✨ 优化 · 🗑 删除 · 拖标题栏移动 · 拖边缘调大小"
+              t("panel.footer")
             )
           )
       );
     }
 
     return {
-      inject: ["slots", "connection"],
+      inject: ["slots", "connection", "locale"],
       apply(ctx) {
         ctx.effect(() => mountCss(THEME_CSS, "dsh-prompt-snippets/theme.css"), "prompt-snippets theme");
         const rpc = ctx.connection.rpc;
+        // 注册 i18n 字典并绑定翻译函数；测试环境无 locale 服务时降级到 zh。
+        let t;
+        let localeSubscribe = null;
+        if (ctx.locale && typeof ctx.locale.register === "function") {
+          ctx.effect(() => ctx.locale.register(NS, { zh, en }), "prompt-snippets dictionaries");
+          t = ctx.locale.bind(NS);
+          localeSubscribe = ctx.locale.subscribe.bind(ctx.locale);
+        } else {
+          t = (key, params) => {
+            const template = zh[key] ?? key;
+            if (!params) return template;
+            return template.replace(/\{(\w+)\}/g, (m, n) => (n in params ? String(params[n]) : m));
+          };
+        }
         ctx.slots.inject("conversation.input.right", () =>
           ctx.slots.register(
             {
               name: "conversation.input.right",
               id: "prompt-snippets",
               order: 10,
-              inject: () => ({ rpc }),
+              inject: () => ({ rpc, t, localeSubscribe }),
             },
             SnippetDock
           )

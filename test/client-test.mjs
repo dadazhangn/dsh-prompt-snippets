@@ -147,7 +147,29 @@ check("样式表含 warn 派生底色", cssText.includes("color-mix") && cssText
 effectsRun.find((e) => e.label === "prompt-snippets theme")?.dispose?.();
 check("dispose 后样式标签被移除", headTags.length === 0);
 
-const props = { ...registered.options.inject(), inputActions: null };
+// 模拟平台 locale 服务：注册字典、绑定 t、提供 subscribe
+const clientSrc = readFileSync(new URL("../client.js", import.meta.url), "utf8");
+const zhDict = {};
+const zhMatch = clientSrc.match(/const zh = \{([\s\S]*?)\n    \};/);
+if (zhMatch) {
+  for (const line of zhMatch[1].split("\n")) {
+    const kv = line.trim().match(/^"([^"]+)":\s*"([^"]*)",?$/);
+    if (kv) zhDict[kv[1]] = kv[2];
+  }
+}
+const fakeLocale = {
+  register() { /* no-op */ },
+  bind() {
+    return (key, params) => {
+      const template = zhDict[key] ?? key;
+      if (!params) return template;
+      return template.replace(/\{(\w+)\}/g, (m, n) => (n in params ? String(params[n]) : m));
+    };
+  },
+  subscribe() { return () => {}; },
+};
+
+const props = { ...registered.options.inject(), inputActions: null, t: fakeLocale.bind("prompt-snippets"), localeSubscribe: fakeLocale.subscribe };
 let tree = rerender(registered.Component, props);
 check("首屏渲染出 dock 容器", tree?.type === "div");
 const btn = tree.children.find((c) => c && c.props && c.props.id === "ps-button");
