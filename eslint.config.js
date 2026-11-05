@@ -38,7 +38,7 @@ export default [
     },
     rules: {
       // ── 推荐规则（ESLint 官方推荐） ──
-      "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }],
       "no-undef": "error",
       "no-redeclare": "error",
       "no-unreachable": "error",

@@ -23,6 +23,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          cache: npm
+
+      - name: 安装依赖（锁定版本）
+        shell: bash
+        run: npm ci
 
       - name: ESLint
         shell: bash
