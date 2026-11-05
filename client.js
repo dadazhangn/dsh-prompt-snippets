@@ -121,14 +121,22 @@ window.__ModuleLoader__.load({
 `;
 
     const style = {
-      dock: { display: "inline-flex", gap: "4px", alignItems: "center" },
+      dock: { display: "inline-flex", gap: "4px", alignItems: "center", flex: "none", minWidth: 0 },
       button: {
         display: "inline-flex",
         alignItems: "center",
+        justifyContent: "center",
         gap: "6px",
-        padding: "3px 8px",
+        // 工具栏里的同级控件（模型选择器、加号按钮）都是固定 28px 高、flex:none、
+        // 文字 nowrap。这里也对齐：固定高度 + 不被 flex 压缩 + 文字永不折行。
+        // 否则窄窗口下按钮被压缩，文字折行会把按钮纵向撑高（“变高”的真正来源）。
+        boxSizing: "border-box",
+        flex: "none",
+        whiteSpace: "nowrap",
+        height: "28px",
+        padding: "0 8px",
         fontSize: "12px",
-        lineHeight: "1.4",
+        lineHeight: "20px",
         borderRadius: "6px",
         border: "1px solid " + C.border,
         background: "transparent",
