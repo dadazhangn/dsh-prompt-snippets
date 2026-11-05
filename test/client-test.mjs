@@ -128,7 +128,7 @@ const DATA = [
 ];
 
 plugin.apply(ctx);
-check("注册到 conversation.composer.dock", registered?.options?.name === "conversation.composer.dock");
+check("注册到 conversation.input.right", registered?.options?.name === "conversation.input.right");
 check("slot id 正确", registered?.options?.id === "prompt-snippets");
 check("inject 带出 rpc", typeof registered?.options?.inject === "function");
 

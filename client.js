@@ -121,14 +121,14 @@ window.__ModuleLoader__.load({
 `;
 
     const style = {
-      dock: { display: "inline-flex", gap: "4px", alignItems: "center", padding: "2px 0" },
+      dock: { display: "inline-flex", gap: "4px", alignItems: "center" },
       button: {
         display: "inline-flex",
         alignItems: "center",
         gap: "6px",
-        padding: "4px 10px",
+        padding: "3px 8px",
         fontSize: "12px",
-        lineHeight: "1.5",
+        lineHeight: "1.4",
         borderRadius: "6px",
         border: "1px solid " + C.border,
         background: "transparent",
@@ -2880,12 +2880,12 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.effect(() => mountCss(THEME_CSS, "dsh-prompt-snippets/theme.css"), "prompt-snippets theme");
         const rpc = ctx.connection.rpc;
-        ctx.slots.inject("conversation.composer.dock", () =>
+        ctx.slots.inject("conversation.input.right", () =>
           ctx.slots.register(
             {
-              name: "conversation.composer.dock",
+              name: "conversation.input.right",
               id: "prompt-snippets",
-              order: 50,
+              order: 10,
               inject: () => ({ rpc }),
             },
             SnippetDock

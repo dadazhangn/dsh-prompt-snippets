@@ -188,7 +188,7 @@ bundle 结构：host 半（`index.js`，命令 + RPC + JSON 存储）、client �
 
 ```
 index.js            host 半：/snippet 命令 + /prompt-snippets RPC + JSON 持久化
-client.js           client 半：conversation.composer.dock 面板
+client.js           client 半：conversation.input.right 面板
 package.json        bundle 声明（dsh.bundle.patch + dsh.client + engines.dsh）
 cordis.patch.yml    插入 host 半的 loader patch
 locale/{en,zh}.json 市场显示名与描述
