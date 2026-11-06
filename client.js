@@ -299,7 +299,7 @@ window.__ModuleLoader__.load({
     const CHANNEL = "/prompt-snippets";
     const Z_TOP = 2147483647;
     // 面板尺寸是上限，实际由 CSS min() 与视口共同决定；clampPos 按上限做保守裁剪。
-    const PANEL_W = 340;
+    const PANEL_W = 380;
     const PANEL_H = 440;
     const GAP = 8;
     // 自定义尺寸的下限：太小就没法用了；上限由视口与 PANEL_W/H 共同约束
@@ -417,7 +417,7 @@ window.__ModuleLoader__.load({
         width: `min(${PANEL_W}px, calc(100vw - ${GAP * 2}px))`,
         maxHeight: `min(${PANEL_H}px, calc(100vh - ${GAP * 3}px))`,
         overflow: "hidden",
-        borderRadius: "10px",
+        borderRadius: "14px",
         // elevation token 自带 0.5px 发丝描边，故 border 置 0，避免双层轮廓
         border: "0",
         background: C.surface,
@@ -441,13 +441,14 @@ window.__ModuleLoader__.load({
       header: {
         display: "flex",
         alignItems: "center",
-        gap: "6px",
-        padding: "7px 8px",
+        gap: "8px",
+        padding: "11px 14px",
         borderBottom: "1px solid " + C.borderSubtle,
+        background: brandTint(7),
         cursor: "move",
         userSelect: "none",
-        fontSize: "12px",
-        fontWeight: 600,
+        fontSize: "13px",
+        fontWeight: 650,
         flexShrink: 0,
       },
       headerTitle: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
@@ -462,7 +463,7 @@ window.__ModuleLoader__.load({
         borderRadius: "4px",
       },
       searchWrap: {
-        padding: "6px 8px",
+        padding: "10px 12px",
         borderBottom: "1px solid " + C.borderSubtle,
         background: C.surfaceAlt,
         flexShrink: 0,
@@ -471,15 +472,15 @@ window.__ModuleLoader__.load({
       search: {
         width: "100%",
         boxSizing: "border-box",
-        padding: "5px 8px",
-        fontSize: "12px",
-        borderRadius: "5px",
+        padding: "8px 10px",
+        fontSize: "13px",
+        borderRadius: "8px",
         border: "1px solid " + C.border,
         outline: "none",
         background: C.surface,
         color: C.text,
       },
-      body: { overflow: "auto", padding: "6px", flex: 1, minHeight: 0 },
+      body: { overflow: "auto", padding: "8px", flex: 1, minHeight: 0 },
       group: {
         fontWeight: 600,
         fontSize: "11px",
@@ -499,9 +500,10 @@ window.__ModuleLoader__.load({
         flex: 1,
         minWidth: 0,
         textAlign: "left",
-        padding: "7px 8px",
+        padding: "9px 10px",
         fontSize: "13px",
-        borderRadius: "5px",
+        lineHeight: 1.45,
+        borderRadius: "8px",
         border: "none",
         background: "transparent",
         color: C.text,
@@ -548,8 +550,8 @@ window.__ModuleLoader__.load({
       viewBar: {
         display: "flex",
         alignItems: "center",
-        gap: "4px",
-        padding: "4px 8px",
+        gap: "6px",
+        padding: "8px 12px",
         borderBottom: "1px solid " + C.borderSubtle,
         background: C.surfaceAlt,
         flexShrink: 0,
@@ -566,7 +568,7 @@ window.__ModuleLoader__.load({
       },
       viewBtnActive: {
         border: "1px solid " + C.border,
-        background: C.surfaceHover,
+        background: brandTint(12),
         color: C.text,
         borderRadius: "999px",
         padding: "2px 10px",
@@ -702,7 +704,7 @@ window.__ModuleLoader__.load({
       },
       iconBusy: { opacity: 0.4, cursor: "default" },
       del: { color: C.danger },
-      empty: { padding: "12px 8px", fontSize: "12px", color: C.textDim },
+      empty: { padding: "20px 12px", fontSize: "12px", lineHeight: 1.6, color: C.textDim },
       error: { padding: "12px 8px", fontSize: "12px", color: C.danger },
       warn: { padding: "6px 8px", fontSize: "11px", flexShrink: 0 },
       undoBar: {
@@ -734,7 +736,7 @@ window.__ModuleLoader__.load({
         flexShrink: 0,
       },
       hint: {
-        padding: "4px 8px 6px",
+        padding: "8px 12px",
         fontSize: "10px",
         color: C.textDim,
         opacity: 0.85,
@@ -818,8 +820,8 @@ window.__ModuleLoader__.load({
         border: "1px solid " + C.border,
         background: C.surfaceHover,
         color: C.text,
-        borderRadius: "5px",
-        padding: "3px 12px",
+        borderRadius: "7px",
+        padding: "6px 12px",
         fontSize: "12px",
         cursor: "pointer",
         flexShrink: 0,
@@ -828,8 +830,8 @@ window.__ModuleLoader__.load({
         border: "1px solid " + C.border,
         background: "transparent",
         color: C.textDim,
-        borderRadius: "5px",
-        padding: "3px 10px",
+        borderRadius: "7px",
+        padding: "6px 11px",
         fontSize: "12px",
         cursor: "pointer",
         flexShrink: 0,
@@ -1245,7 +1247,6 @@ window.__ModuleLoader__.load({
       // locale 切换时强制重渲染（t 是外部绑定的纯函数，不会随 locale 自动更新）。
       // 用 useState 而非 useEffect，避免 hook 槽位偏移影响既有测试。
       const [, setLocaleRev] = useState(0);
-      if (localeSubscribe) localeSubscribe(() => setLocaleRev((n) => n + 1));
       const [snippets, setSnippets] = useState([]);
       const [readOnly, setReadOnly] = useState(false); // host 只读保护：version 更高 / 隔离失败时禁用一切写操作
       const [open, setOpen] = useState(false);
@@ -1310,6 +1311,11 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         load();
       }, []);
+
+      useEffect(() => {
+        if (!localeSubscribe) return;
+        return localeSubscribe(() => setLocaleRev((n) => n + 1));
+      }, [localeSubscribe]);
 
       // ── v1.3 命令面板：全局快捷唤起 Ctrl+Shift+K / Ctrl+Shift+P ──
       // 打开时把 dock 面板关掉，避免两个入口打架；focus 交给 palette input。
@@ -1571,7 +1577,7 @@ window.__ModuleLoader__.load({
             const controller = abortRef.current;
             if (controller) controller.abort();
             setOptimizing(null);
-            setReview((prev) => (prev ? { ...prev, busy: false, stopping: false } : prev));
+            setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true } : prev));
           }
         }
       };
@@ -1865,6 +1871,7 @@ window.__ModuleLoader__.load({
                     ...prev,
                     optimized: String(value.optimized || ""),
                     truncated: value.truncated === true,
+                    incomplete: false,
                     retries,
                     busy: false,
                     stopping: false,
@@ -1881,12 +1888,12 @@ window.__ModuleLoader__.load({
               return;
             }
             setReview((prev) =>
-              prev ? { ...prev, busy: false, stopping: false, error: err.message || t("error.optimizeFailed") } : prev,
+              prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: err.message || t("error.optimizeFailed") } : prev,
             );
           })
           .catch((e) => {
             setOptimizing(null);
-            setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, error: msgOf(e) } : prev));
+            setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: msgOf(e) } : prev));
           });
       };
 
@@ -1908,8 +1915,7 @@ window.__ModuleLoader__.load({
           // 已接收的原始文本（未 trim，保证段落顺序），done 时用 host 回传的 optimized 覆盖
           let acc = "";
 
-          const decode = (chunk) => {
-            const bytes = chunk.value;
+          const decode = (bytes) => {
             if (decoder) return decoder.decode(bytes, { stream: true });
             let s = "";
             for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
@@ -1942,6 +1948,7 @@ window.__ModuleLoader__.load({
                       ...prev,
                       optimized: String(msg.optimized || ""),
                       truncated: msg.truncated === true,
+                      incomplete: false,
                       retries,
                       busy: false,
                       stopping: false,
@@ -1956,14 +1963,14 @@ window.__ModuleLoader__.load({
                   setReview(null);
                   return;
                 }
-                setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, error: msg.message || t("error.optimizeFailed") } : prev));
+                setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: msg.message || t("error.optimizeFailed") } : prev));
                 return;
               }
             }
           }
           // 流意外结束但没有 done：视为失败
           setOptimizing(null);
-          setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, error: t("error.optimizeFailed") } : prev));
+          setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: t("error.optimizeFailed") } : prev));
         } catch (e) {
           // fetch 被 abort 时静默收起（stopOptimize 已先置 stopping），其他错误填 error
           if (signal && signal.aborted) {
@@ -1972,7 +1979,7 @@ window.__ModuleLoader__.load({
             return;
           }
           setOptimizing(null);
-          setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, error: msgOf(e) } : prev));
+          setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: msgOf(e) } : prev));
         }
       };
 
@@ -1991,6 +1998,7 @@ window.__ModuleLoader__.load({
           snippet,
           original: snippet.content,
           optimized: "",
+          incomplete: false,
           truncated: false,
           retries: 0,
           busy: true,
@@ -2008,7 +2016,7 @@ window.__ModuleLoader__.load({
         const controller = typeof AbortController === "function" ? new AbortController() : null;
         abortRef.current = controller;
         setOptimizing(cur.snippet.id);
-        setReview({ ...cur, busy: true, stopping: false, error: null, conflict: null, retries: cur.retries + 1 });
+        setReview({ ...cur, optimized: "", incomplete: false, busy: true, stopping: false, error: null, conflict: null, retries: cur.retries + 1 });
         runOptimize(cur.snippet, cur.retries + 1, controller ? controller.signal : undefined);
       };
 
@@ -2057,7 +2065,7 @@ window.__ModuleLoader__.load({
       /** 替换片段正文：唯一会落盘的动作，必须带 expectedRevision。 */
       const saveOptimized = (force) => {
         const cur = review;
-        if (!cur || cur.busy || cur.saving) return;
+        if (!cur || cur.busy || cur.saving || cur.incomplete) return;
         // 编辑后以实时字节数为准；force 覆盖仍放行超长（用户明确要覆盖）
         if (byteLen(cur.optimized) > MAX_CONTENT && !force) return;
         const s = cur.snippet;
@@ -2496,7 +2504,7 @@ window.__ModuleLoader__.load({
         const overLong = byteLen(cur.optimized) > MAX_CONTENT;
         const retryLeft = MAX_RETRY - cur.retries;
         const canRetry = !cur.busy && retryLeft > 0;
-        const canReplace = !cur.busy && !cur.saving && !overLong && lost.length === 0 && !!cur.optimized;
+        const canReplace = !cur.busy && !cur.saving && !cur.incomplete && !overLong && lost.length === 0 && !!cur.optimized;
         const optTitle = overLong
           ? t("review.overLong")
           : lost.length > 0
@@ -2637,9 +2645,9 @@ window.__ModuleLoader__.load({
                 {
                   type: "button",
                   className: "ps-primary",
-                  style: cur.busy || !cur.optimized ? { ...style.btnPrimary, ...style.btnDisabled } : style.btnPrimary,
+                  style: cur.busy || cur.incomplete || !cur.optimized ? { ...style.btnPrimary, ...style.btnDisabled } : style.btnPrimary,
                   onClick: insertOptimized,
-                  disabled: cur.busy || !cur.optimized,
+                  disabled: cur.busy || cur.incomplete || !cur.optimized,
                   title: t("review.insertOptimizedTitle"),
                 },
                 t("review.insertOptimized"),

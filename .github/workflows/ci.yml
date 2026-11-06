@@ -48,3 +48,4 @@ jobs:
           node test/io-test.mjs
           node test/client-test.mjs
           node test/client-error-test.mjs
+          node test/stream-client-test.mjs

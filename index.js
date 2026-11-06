@@ -733,6 +733,18 @@ async function recordHistory(id, prev) {
   }
 }
 
+function historySnapshotOf(snippet) {
+  return {
+    name: snippet.name,
+    content: snippet.content,
+    variables: snippet.variables,
+    category: snippet.category,
+    tags: snippet.tags,
+    at: snippet.updatedAt,
+    revision: snippet.revision,
+  };
+}
+
 /** 读取某片段的历史版本（新→旧）。读失败/不存在都返回空数组。 */
 async function listHistory(id) {
   try {
@@ -788,7 +800,10 @@ async function transact(mutator) {
       await persist(store);
     }
     const result = await mutator(store);
-    if (result && result.ok && result.changed) await persist(store);
+    if (result && result.ok && result.changed) {
+      await persist(store);
+      for (const { id, prev } of result.history || []) await recordHistory(id, prev);
+    }
     if (result && result.ok && warnings.length > 0) {
       result.value.warning = warnings.join("\n");
     }
@@ -858,6 +873,40 @@ function optimizeAvailability(ctx) {
   return { available: true, reason: null, provider, model };
 }
 
+/**
+ * 推理模型（deepseek-v4-pro 等）会在正文前先产出 reasoning-delta（思考），
+ * 思考消耗的输出 token 会计入 maxTokens。若不压思考强度，短预算会被思考烧光，
+ * 正文出不来 → 优化结果为空。这里取该模型支持的最低 effort 档（如 "low"），
+ * 让优化走「少思考、快出正文」；非推理模型或拿不到元数据时返回 undefined，保持原行为。
+ */
+async function lowestReasoningEffort(ctx, provider, model, signal) {
+  const llm = ctx.get("llm");
+  if (!llm || typeof llm.resolveModelInfo !== "function") return undefined;
+  try {
+    const info = await llm.resolveModelInfo(provider, model, signal);
+    const efforts = Array.isArray(info?.reasoning?.efforts) ? info.reasoning.efforts : [];
+    return efforts.length > 0 ? efforts[0].id : undefined;
+  } catch (_) {
+    return undefined;
+  }
+}
+
+/** DSH finish reasons distinguish token limits, cancellation, and provider errors. */
+function optimizeFinishFailure(reason) {
+  if (!reason || typeof reason !== "object") return null;
+  if (reason.kind === "max-tokens") {
+    return fail("output-limit", "模型输出达到长度上限，结果可能不完整，请重新优化。");
+  }
+  if (reason.kind === "aborted") return fail("aborted", "优化已取消");
+  if (reason.kind === "error") {
+    const message = typeof reason.failure?.message === "string" && reason.failure.message
+      ? reason.failure.message
+      : "模型生成失败";
+    return fail("internal", message);
+  }
+  return null;
+}
+
 async function optimize(ctx, content, signal) {
   const avail = optimizeAvailability(ctx);
   if (!avail.available) return fail("unavailable", avail.reason);
@@ -865,7 +914,9 @@ async function optimize(ctx, content, signal) {
   const provider = avail.provider;
   const model = avail.model;
 
+  const effort = await lowestReasoningEffort(ctx, provider, model, signal);
   let text = "";
+  let finishFailure = null;
   try {
     for await (const chunk of llm.stream({
       provider,
@@ -874,15 +925,22 @@ async function optimize(ctx, content, signal) {
       messages: [{ role: "user", content: [{ type: "text", text: content }] }],
       // 提示词优化不需要长输出，反而会诱导模型扩写到冗长、拖慢生成。
       // 按输入长度自适应：短输入 600、中等 900、长输入 1200 封顶，明显比固定 2000 更快。
-      maxTokens: content.length > 1000 ? 1200 : content.length > 200 ? 900 : 600,
+      // 推理模型要把思考也算进输出预算，否则思考会烧光 token、正文出不来。
+      maxTokens: effort
+        ? content.length > 1000 ? 2500 : content.length > 200 ? 2000 : 1600
+        : content.length > 1000 ? 1200 : content.length > 200 ? 900 : 600,
+      ...(effort ? { reasoningEffort: effort } : {}),
       ...(signal ? { signal } : {}),
     })) {
       if (chunk && chunk.type === "text-delta") text += chunk.text;
+      if (chunk?.type === "finish") finishFailure = optimizeFinishFailure(chunk.reason);
     }
   } catch (error) {
     if (signal && signal.aborted) return fail("aborted", "优化已取消");
     return fail("internal", error instanceof Error ? error.message : String(error));
   }
+
+  if (finishFailure) return finishFailure;
 
   const optimized = text.trim();
   if (!optimized) return fail("internal", "优化结果为空");
@@ -933,20 +991,27 @@ function optimizeStreamResponse(ctx, content, requestSignal) {
       const provider = avail.provider;
       const model = avail.model;
 
+      const effort = await lowestReasoningEffort(ctx, provider, model, requestSignal);
+
       let text = "";
+      let finishFailure = null;
       try {
         for await (const chunk of llm.stream({
           provider,
           model,
           system: OPTIMIZE_SYSTEM,
           messages: [{ role: "user", content: [{ type: "text", text: content }] }],
-          maxTokens: content.length > 1000 ? 1200 : content.length > 200 ? 900 : 600,
+          maxTokens: effort
+            ? content.length > 1000 ? 2500 : content.length > 200 ? 2000 : 1600
+            : content.length > 1000 ? 1200 : content.length > 200 ? 900 : 600,
+          ...(effort ? { reasoningEffort: effort } : {}),
           ...(requestSignal ? { signal: requestSignal } : {}),
         })) {
           if (chunk && chunk.type === "text-delta") {
             text += chunk.text;
             push({ type: "delta", text: chunk.text });
           }
+          if (chunk?.type === "finish") finishFailure = optimizeFinishFailure(chunk.reason);
         }
       } catch (error) {
         if (requestSignal && requestSignal.aborted) {
@@ -954,6 +1019,12 @@ function optimizeStreamResponse(ctx, content, requestSignal) {
         } else {
           push({ type: "error", code: "internal", message: error instanceof Error ? error.message : String(error) });
         }
+        controller.close();
+        return;
+      }
+
+      if (finishFailure) {
+        push({ type: "error", code: finishFailure.error.code, message: finishFailure.error.message });
         controller.close();
         return;
       }
@@ -1080,15 +1151,7 @@ async function saveSnippet(payload) {
       const variablesChanged = JSON.stringify(existing.variables) !== JSON.stringify(variables);
       if (contentChanged || variablesChanged) {
         historyId = existing.id;
-        historySnapshot = {
-          name: existing.name,
-          content: existing.content,
-          variables: existing.variables,
-          category: existing.category,
-          tags: existing.tags,
-          at: existing.updatedAt,
-          revision: existing.revision,
-        };
+        historySnapshot = historySnapshotOf(existing);
       }
       existing.name = name;
       existing.content = content;
@@ -1409,6 +1472,7 @@ async function importSnippets(payload) {
     //          外部（如面板草稿的 expectedRevision）不会因为一次导入而集体失效。
     const pool = mode === "replace" ? store.snippets.slice() : alive(store);
     const matched = new Set();
+    const history = [];
 
     for (const item of parsed.snippets) {
       const exist = pool.find((s) => s.name === item.name && !matched.has(s.id)) ?? null;
@@ -1421,6 +1485,9 @@ async function importSnippets(payload) {
         matched.add(exist.id);
         plan.updated++;
         if (!dryRun) {
+          if (exist.content !== item.content || JSON.stringify(exist.variables) !== JSON.stringify(item.variables)) {
+            history.push({ id: exist.id, prev: historySnapshotOf(exist) });
+          }
           exist.content = item.content;
           exist.variables = item.variables;
           exist.category = item.category;
@@ -1479,7 +1546,7 @@ async function importSnippets(payload) {
     if (plan.added === 0 && plan.updated === 0 && plan.skipped === 0 && plan.deleted === 0) {
       return { ok: true, changed: false, value: { plan, ...view(store).value } };
     }
-    return { ok: true, changed: true, value: { plan, ...view(store).value } };
+    return { ok: true, changed: true, history, value: { plan, ...view(store).value } };
   });
 }
 

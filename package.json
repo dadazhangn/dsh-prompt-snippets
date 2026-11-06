@@ -55,7 +55,7 @@
   "scripts": {
     "lint": "eslint index.js client.js",
     "lint:fix": "eslint index.js client.js --fix",
-    "test": "node test/v110-host-test.mjs && node test/optimize-test.mjs && node test/io-test.mjs && node test/client-test.mjs && node test/client-error-test.mjs"
+    "test": "node test/v110-host-test.mjs && node test/optimize-test.mjs && node test/io-test.mjs && node test/client-test.mjs && node test/client-error-test.mjs && node test/stream-client-test.mjs"
   },
   "dsh": {
     "bundle": {

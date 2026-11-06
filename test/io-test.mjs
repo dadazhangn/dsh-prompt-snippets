@@ -202,6 +202,9 @@ await reset({ version: 4, snippets: [] });
   check("replace 后只剩导入的 1 条活跃", store.snippets.filter((s) => s.deletedAt === null || s.deletedAt === undefined).length === 1, String(store.snippets.length));
   check("replace 覆盖了同名内容", store.snippets.find((s) => s.name === "同名").content === "替换后");
   check("replace 递增 revision", store.snippets.find((s) => s.name === "同名").revision === 2, String(store.snippets.find((s) => s.name === "同名").revision));
+  const replaced = store.snippets.find((s) => s.name === "同名");
+  const previous = await call("history", { id: replaced.id });
+  check("replace 保留被覆盖正文的历史", previous.value?.history?.[0]?.content === "旧内容");
 }
 
 // ══════════════ 8. --dry 预演不写盘 ══════════════

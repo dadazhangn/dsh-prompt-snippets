@@ -67,6 +67,77 @@ check("带 system 指令", typeof captured?.system === "string" && captured.syst
 check("带 maxTokens", captured?.maxTokens === 600);
 check("消息为 request-user-input 形状", captured?.messages?.[0]?.role === "user" && captured.messages[0].content[0].type === "text");
 
+// 4b) 推理模型路径：resolveModelInfo 返回最低 effort，应透传 reasoningEffort 并提高 maxTokens
+fakeModel = { currentSelection: () => ({ provider: "p", model: "m" }) };
+let rCaptured = null;
+fakeLlm = {
+  resolveModelInfo: async () => ({ reasoning: { efforts: [{ id: "low", name: "低", description: "" }, { id: "high", name: "高", description: "" }] } }),
+  stream(opts) { rCaptured = opts; return makeStream([
+    { type: "reasoning-delta", index: 0, text: "思考过程" },
+    { type: "text-delta", index: 0, text: "优化后的提示词 {{占位}}" },
+    { type: "finish", reason: { kind: "stop" } },
+  ])(); },
+};
+r = await runOptimize();
+check("推理模型仍返回 optimized", r.ok === true && r.value.optimized === "优化后的提示词 {{占位}}", r.value?.optimized);
+check("推理模型透传最低 reasoningEffort", rCaptured?.reasoningEffort === "low", JSON.stringify(rCaptured?.reasoningEffort));
+check("推理模型提高 maxTokens", rCaptured?.maxTokens === 1600, String(rCaptured?.maxTokens));
+
+// 模型达到输出上限时，即使已经产出正文，也不能把半截结果当成成功。
+fakeLlm = { stream: makeStream([
+  { type: "text-delta", text: "半截优化结果 {{占位}}" },
+  { type: "finish", reason: { kind: "max-tokens" } },
+]) };
+r = await runOptimize();
+check("输出达到上限时拒绝半截结果", r.ok === false && r.error.code === "output-limit", r.error?.code);
+
+fakeLlm = { stream: makeStream([
+  { type: "text-delta", text: "不完整结果 {{占位}}" },
+  { type: "finish", reason: { kind: "error", failure: { code: "RATE_LIMIT", message: "请求过于频繁" } } },
+]) };
+r = await runOptimize();
+check("终止错误时拒绝部分结果", r.ok === false && r.error.code === "internal" && r.error.message === "请求过于频繁", r.error?.message);
+
+fakeLlm = { stream: makeStream([
+  { type: "text-delta", text: "不完整结果 {{占位}}" },
+  { type: "finish", reason: { kind: "aborted", failure: { code: "ABORTED", message: "已取消" } } },
+]) };
+r = await runOptimize();
+check("终止取消时拒绝部分结果", r.ok === false && r.error.code === "aborted", r.error?.code);
+
+let streamRoute = null;
+apply({
+  connection: {
+    register() {},
+    fetch: { register(route) { streamRoute = route; return () => {}; } },
+  },
+  commands: { register() {} },
+  effect(fn) { fn(); },
+  get(name) {
+    if (name === "llm") return fakeLlm;
+    if (name === "agentDefaultModel") return fakeModel;
+    return undefined;
+  },
+});
+const makeStreamRequest = () => new Request("http://localhost/api/prompt-snippets/optimize-stream", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ content: "原始提示词 {{占位}}" }),
+});
+fakeLlm = { stream: makeStream([
+  { type: "text-delta", text: "半截优化结果 {{占位}}" },
+  { type: "finish", reason: { kind: "max-tokens" } },
+]) };
+const streamMessages = (await (await streamRoute.fetch(makeStreamRequest())).text()).trim().split("\n").map(JSON.parse);
+check("流式输出达到上限时返回错误", streamMessages.at(-1)?.code === "output-limit", JSON.stringify(streamMessages.at(-1)));
+
+fakeLlm = { stream: makeStream([
+  { type: "text-delta", text: "不完整结果 {{占位}}" },
+  { type: "finish", reason: { kind: "error", failure: { code: "RATE_LIMIT", message: "请求过于频繁" } } },
+]) };
+const failedStreamMessages = (await (await streamRoute.fetch(makeStreamRequest())).text()).trim().split("\n").map(JSON.parse);
+check("流式终止错误返回 error", failedStreamMessages.at(-1)?.type === "error" && failedStreamMessages.at(-1)?.message === "请求过于频繁", JSON.stringify(failedStreamMessages.at(-1)));
+
 // 5) 流内抛错
 fakeLlm = { stream: async function* () { throw new Error("网络炸了"); } };
 r = await runOptimize();
