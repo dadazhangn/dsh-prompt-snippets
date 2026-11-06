@@ -33,7 +33,12 @@ export default [
         clearInterval: "readonly",
         queueMicrotask: "readonly",
         TextEncoder: "readonly",
+        TextDecoder: "readonly",
+        fetch: "readonly",
+        ReadableStream: "readonly",
+        Response: "readonly",
         AbortController: "readonly",
+        AbortSignal: "readonly",
       },
     },
     rules: {

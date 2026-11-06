@@ -78,6 +78,9 @@ global.setTimeout = (fn) => fn();
 // —— 载入 client.js ——
 const { readFileSync } = await import("node:fs");
 const src = readFileSync(new URL("../client.js", import.meta.url), "utf8");
+// 测试替身不模拟流式 fetch：显式关掉全局 fetch，让 optimize 走 rpc 回退路径，
+// 否则 Node 18+ 的全局 fetch 会把相对 URL "/api/..." 报成 "Failed to parse URL"。
+global.fetch = undefined;
 // 在 window 存在的环境下执行
 new Function("window", "localStorage", "document", "setTimeout", "require", src)(
   global.window,

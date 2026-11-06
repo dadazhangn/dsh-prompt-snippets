@@ -1849,6 +1849,11 @@ window.__ModuleLoader__.load({
       const abortRef = useRef(null);
 
       const runOptimize = (snippet, retries, signal) => {
+        // 浏览器有全局 fetch 时走流式透传（实时看到生成进度）；测试替身无 fetch 时退回 rpc。
+        if (typeof fetch === "function") {
+          streamOptimize(snippet, retries, signal);
+          return;
+        }
         Promise.resolve(rpc.call(CHANNEL, "optimize", { content: snippet.content }, signal))
           .then((result) => {
             setOptimizing(null);
@@ -1883,6 +1888,92 @@ window.__ModuleLoader__.load({
             setOptimizing(null);
             setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, error: msgOf(e) } : prev));
           });
+      };
+
+      // A 方案：走 host 的 /api/prompt-snippets/optimize-stream，逐行 NDJSON 读取，
+      // 每收到一段 text-delta 就累加进 review.optimized，textarea 实时显示生成进度。
+      const streamOptimize = async (snippet, retries, signal) => {
+        try {
+          const response = await fetch("/api/prompt-snippets/optimize-stream", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ content: snippet.content }),
+            signal,
+            credentials: "include",
+          });
+          if (!response.body) throw new Error("流式响应没有 body");
+          const reader = response.body.getReader();
+          const decoder = typeof TextDecoder === "function" ? new TextDecoder() : null;
+          let buffer = "";
+          // 已接收的原始文本（未 trim，保证段落顺序），done 时用 host 回传的 optimized 覆盖
+          let acc = "";
+
+          const decode = (chunk) => {
+            const bytes = chunk.value;
+            if (decoder) return decoder.decode(bytes, { stream: true });
+            let s = "";
+            for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+            return s;
+          };
+
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decode(value);
+            let nl;
+            while ((nl = buffer.indexOf("\n")) >= 0) {
+              const line = buffer.slice(0, nl).trim();
+              buffer = buffer.slice(nl + 1);
+              if (!line) continue;
+              let msg;
+              try {
+                msg = JSON.parse(line);
+              } catch (_) {
+                continue; // 半行/坏行跳过，等下一段
+              }
+              if (msg.type === "delta") {
+                acc += msg.text || "";
+                setReview((prev) => (prev ? { ...prev, optimized: acc } : prev));
+              } else if (msg.type === "done") {
+                setOptimizing(null);
+                setReview((prev) =>
+                  prev
+                    ? {
+                      ...prev,
+                      optimized: String(msg.optimized || ""),
+                      truncated: msg.truncated === true,
+                      retries,
+                      busy: false,
+                      stopping: false,
+                      error: null,
+                    }
+                    : prev,
+                );
+                return;
+              } else if (msg.type === "error") {
+                setOptimizing(null);
+                if (msg.code === "aborted") {
+                  setReview(null);
+                  return;
+                }
+                setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, error: msg.message || t("error.optimizeFailed") } : prev));
+                return;
+              }
+            }
+          }
+          // 流意外结束但没有 done：视为失败
+          setOptimizing(null);
+          setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, error: t("error.optimizeFailed") } : prev));
+        } catch (e) {
+          // fetch 被 abort 时静默收起（stopOptimize 已先置 stopping），其他错误填 error
+          if (signal && signal.aborted) {
+            setOptimizing(null);
+            setReview(null);
+            return;
+          }
+          setOptimizing(null);
+          setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, error: msgOf(e) } : prev));
+        }
       };
 
       const optimize = (snippet) => {
@@ -2436,7 +2527,8 @@ window.__ModuleLoader__.load({
                   {
                     className: "ps-textarea",
                     style: style.reviewInput,
-                    value: cur.busy ? "" : cur.optimized,
+                    // busy 时仍实时显示已生成的文本（流式透传），只是禁止编辑
+                    value: cur.optimized,
                     disabled: cur.busy,
                     placeholder: cur.busy ? (cur.stopping ? t("review.stopping") : t("review.generating")) : t("review.empty"),
                     onChange: (ev) =>

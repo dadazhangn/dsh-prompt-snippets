@@ -64,7 +64,7 @@ r = await runOptimize();
 check("正常流返回 optimized", r.ok === true && r.value.optimized === "优化后的提示词 {{占位}}", r.value?.optimized);
 check("透传 provider/model", captured?.provider === "p" && captured?.model === "m");
 check("带 system 指令", typeof captured?.system === "string" && captured.system.includes("{{占位符}}"));
-check("带 maxTokens", captured?.maxTokens === 2000);
+check("带 maxTokens", captured?.maxTokens === 600);
 check("消息为 request-user-input 形状", captured?.messages?.[0]?.role === "user" && captured.messages[0].content[0].type === "text");
 
 // 5) 流内抛错

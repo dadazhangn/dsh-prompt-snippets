@@ -872,7 +872,9 @@ async function optimize(ctx, content, signal) {
       model,
       system: OPTIMIZE_SYSTEM,
       messages: [{ role: "user", content: [{ type: "text", text: content }] }],
-      maxTokens: 2000,
+      // 提示词优化不需要长输出，反而会诱导模型扩写到冗长、拖慢生成。
+      // 按输入长度自适应：短输入 600、中等 900、长输入 1200 封顶，明显比固定 2000 更快。
+      maxTokens: content.length > 1000 ? 1200 : content.length > 200 ? 900 : 600,
       ...(signal ? { signal } : {}),
     })) {
       if (chunk && chunk.type === "text-delta") text += chunk.text;
@@ -901,6 +903,90 @@ async function optimize(ctx, content, signal) {
     ok: true,
     value: { optimized, original: content, truncated },
   };
+}
+
+/**
+ * A 方案：流式透传。和 optimize() 共享同一套判定与校验，但不一次性攒齐再返回，
+ * 而是边生成边把 text-delta 以 NDJSON 行推给浏览器，textarea 实时刷新。
+ * 行协议：{"type":"delta","text":"…"} | {"type":"done","optimized":"…","truncated":bool}
+ *        | {"type":"error","code":"…","message":"…"}
+ * 取消：request.signal 断开时 ReadableStream 的 cancel 会触发，llm.stream 的 signal 停流。
+ */
+function optimizeStreamResponse(ctx, content, requestSignal) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const push = (obj) => {
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+        } catch (_) {
+          /* 已关闭/取消，忽略 */
+        }
+      };
+      const avail = optimizeAvailability(ctx);
+      if (!avail.available) {
+        push({ type: "error", code: "unavailable", message: avail.reason });
+        controller.close();
+        return;
+      }
+      const llm = ctx.get("llm");
+      const provider = avail.provider;
+      const model = avail.model;
+
+      let text = "";
+      try {
+        for await (const chunk of llm.stream({
+          provider,
+          model,
+          system: OPTIMIZE_SYSTEM,
+          messages: [{ role: "user", content: [{ type: "text", text: content }] }],
+          maxTokens: content.length > 1000 ? 1200 : content.length > 200 ? 900 : 600,
+          ...(requestSignal ? { signal: requestSignal } : {}),
+        })) {
+          if (chunk && chunk.type === "text-delta") {
+            text += chunk.text;
+            push({ type: "delta", text: chunk.text });
+          }
+        }
+      } catch (error) {
+        if (requestSignal && requestSignal.aborted) {
+          push({ type: "error", code: "aborted", message: "优化已取消" });
+        } else {
+          push({ type: "error", code: "internal", message: error instanceof Error ? error.message : String(error) });
+        }
+        controller.close();
+        return;
+      }
+
+      const optimized = text.trim();
+      if (!optimized) {
+        push({ type: "error", code: "internal", message: "优化结果为空" });
+        controller.close();
+        return;
+      }
+      const before = scanPlaceholders(content).names;
+      const after = new Set(scanPlaceholders(optimized).names);
+      const lost = before.filter((n) => !after.has(n));
+      if (lost.length > 0) {
+        push({
+          type: "error",
+          code: "internal",
+          message: `优化结果丢失了占位符 ${lost.map((n) => `{{${n}}}`).join("、")}，请再试一次。`,
+        });
+        controller.close();
+        return;
+      }
+      push({ type: "done", optimized, truncated: optimized.length > MAX_CONTENT });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 // ───────────────────────────── 写入端点 ─────────────────────────────
@@ -1753,6 +1839,32 @@ export function apply(ctx) {
       return fail("internal", error instanceof Error ? error.message : String(error));
     }
   });
+
+  // A 方案流式透传路由：通用 channel 是 unary buffered，无法边生成边回传；
+  // 走 connection.fetch 的 /api 精确路由，响应 body 用 ReadableStream 逐 chunk 写回。
+  if (ctx.connection && typeof ctx.connection.fetch?.register === "function") {
+    ctx.effect(() => ctx.connection.fetch.register({
+      path: "/api/prompt-snippets/optimize-stream",
+      methods: ["POST"],
+      requestBody: "buffered",
+      fetch: async (request) => {
+        let content = "";
+        try {
+          const body = await request.json();
+          content = typeof body?.content === "string" ? body.content : "";
+        } catch (_) {
+          /* 空 body 或非 JSON 当空内容处理 */
+        }
+        if (!content.trim()) {
+          return new Response(
+            JSON.stringify({ type: "error", code: "bad-request", message: "片段内容不能为空" }) + "\n",
+            { status: 200, headers: { "content-type": "application/x-ndjson; charset=utf-8" } },
+          );
+        }
+        return optimizeStreamResponse(ctx, content, request.signal);
+      },
+    }), "prompt-snippets optimize-stream route");
+  }
 
   // 进程退出前把待写的使用次数落盘（最坏丢 5 秒统计）
   try {
