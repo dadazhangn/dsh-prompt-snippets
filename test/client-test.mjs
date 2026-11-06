@@ -53,6 +53,9 @@ global.window = {
   __ModuleLoader__: { load: ({ id, factory }) => { plugin = factory(requireStub); } },
   innerWidth: 1400,
   innerHeight: 900,
+  addEventListener() {},
+  removeEventListener() {},
+  _handlers: {},
 };
 const requireStub = (spec) => {
   if (spec === "react") return React;
@@ -115,8 +118,12 @@ const fakeRpc = {
 };
 const injected = [];
 const effectsRun = [];
+const shortcutRegistrations = [];
+let shortcutDisposals = 0;
+const fakeShortcuts = { register(command) { shortcutRegistrations.push(command); return () => { shortcutDisposals++; }; } };
 const ctx = {
   connection: { rpc: fakeRpc },
+  shortcuts: fakeShortcuts,
   effect(cb, label) { const dispose = cb(); effectsRun.push({ label, dispose }); return dispose; },
   slots: {
     inject(key, cb) { injected.push(key); cb(); },
@@ -180,9 +187,11 @@ check("渲染出片段库按钮", !!btn && btn.children.includes("📋 片段库
 
 // —— 绑定 inputActions 并展开面板 ——
 const inserted = [];
+let submitted = 0;
 props.inputActions = {
   captureInsertion: () => ({ from: 0, to: 0 }),
   insertText: (t) => { inserted.push(t); return true; },
+  submit: () => { submitted += 1; },
 };
 await registered.Component(props); // 触发 effect 里的 load
 const listEffects = effects.map((e) => e.fn);
@@ -215,6 +224,15 @@ const flat = (node) => {
 };
 const panelText = flat(panel).filter((x) => typeof x === "string");
 check("面板显示三个片段名", ["代码审查", "周报", "无分类项"].every((n) => panelText.includes(n)), panelText.join("|"));
+const helpButton = flat(panel).find((node) => node?.props?.["aria-label"] === "快捷键帮助");
+check("面板提供快捷键帮助入口", !!helpButton);
+helpButton?.props?.onClick();
+tree = rerender(registered.Component, props);
+const helpTexts = flat(tree).filter((node) => typeof node === "string");
+check("快捷键帮助展示导航和插入/发送说明", helpTexts.some((text) => text.includes("方向键：选择片段")) && helpTexts.some((text) => text.includes("Ctrl+Enter：插入并发送")));
+flat(tree).find((node) => node?.props?.["aria-label"] === "关闭快捷键帮助")?.props?.onClick();
+tree = rerender(registered.Component, props);
+check("快捷键帮助关闭后返回面板", !!tree.children.find((node) => node?.props?.id === "ps-panel") && !flat(tree).some((node) => node?.props?.["aria-label"] === "快捷键与键盘操作"));
 check("有分类分组标题", panelText.includes("开发") && panelText.includes("写作"));
 check("渲染了搜索框", flat(panel).some((x) => x?.props?.placeholder?.includes("搜索")));
 
@@ -344,18 +362,73 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   // 插入按钮在必填未填时应禁用
   let insBtn = findBtnByText(t, "插入");
   check("必填空着时插入按钮禁用", insBtn?.props?.disabled === true);
+  const emptyFillForm = allNodes(panelOf(t)).find((n) => n?.props?.id === "ps-fill-form");
+  const focusTargets = [];
+  const emptyFormInputs = allNodes(emptyFillForm).filter(
+    (n) => n?.props?.className === "ps-input" || n?.props?.className === "ps-textarea" || n?.props?.className === "ps-select"
+  );
+  const mockInputElements = emptyFormInputs.map(() => ({ focus() { focusTargets.push(this); } }));
+  emptyFormInputs.forEach((node, index) => node.props.ref?.(mockInputElements[index]));
+  const openFormFocusEffect = effects.find((entry) => entry.fn.toString().includes("firstRequired"));
+  openFormFocusEffect?.fn();
+  await new Promise((r) => setImmediate(r));
+  check("打开占位符表单自动聚焦第一个必填项", focusTargets.length === 1 && focusTargets[0] === mockInputElements[0]);
+  focusTargets.length = 0;
+  const submitsBeforeBlockedShortcut = submitted;
+  let blockedShortcutPrevented = 0;
+  let blockedShortcutStopped = 0;
+  const realWindowAddForFill = window.addEventListener;
+  window.addEventListener = (type, fn) => { if (type === "keydown") window._handlers[type] = fn; };
+  const emptyFormKeyEffect = effects.find((entry) => entry.fn.toString().includes("inPanel && filling"));
+  const emptyFormKeyCleanup = emptyFormKeyEffect?.fn();
+  window._handlers.keydown?.({
+    target: { closest: (selector) => selector === "#ps-panel" ? {} : null },
+    key: "Enter", ctrlKey: true, metaKey: false,
+    preventDefault: () => { blockedShortcutPrevented++; },
+    stopPropagation: () => { blockedShortcutStopped++; },
+  });
+  check("填写表单提示 Ctrl+Enter 与 Esc", allNodes(emptyFillForm).some((n) => typeof n === "string" && n.includes("Ctrl+Enter") && n.includes("Esc")));
+  check("必填未填时 Ctrl+Enter 不发送", submitted === submitsBeforeBlockedShortcut && inserted.length === 0);
+  check("必填未填时 Ctrl+Enter 聚焦首个缺失项", focusTargets.length === 1 && focusTargets[0] === mockInputElements[0]);
+  check("必填未填时阻止宿主提交", blockedShortcutPrevented === 1 && blockedShortcutStopped === 1);
+  let searchFocusCount = 0;
+  const searchNode = allNodes(panelOf(t)).find((node) => node?.props?.placeholder?.includes("搜索"));
+  searchNode.props.ref.current = { focus() { searchFocusCount++; } };
+  allNodes(emptyFillForm).find((node) => node?.props?.onClick && node.children?.includes("取消"))?.props?.onClick();
+  check("取消占位符表单后焦点回到搜索框", searchFocusCount === 1);
 
   // 填必填项（「代码」因变量名含「代码」渲染为 textarea，「关注点」仍是单行 input）
+  row.props.onClick();
+  t = rerender(registered.Component, props);
   const inputs = allNodes(panelOf(t)).filter(
     (n) => n?.props?.className === "ps-input" || n?.props?.className === "ps-textarea"
   );
   check("表单为每个变量渲染一个输入框", inputs.length === 2, String(inputs.length));
+  const reopenedInputs = inputs.map(() => ({ focus() {} }));
+  inputs.forEach((node, index) => {
+    if (typeof node.props.ref === "function") node.props.ref(reopenedInputs[index]);
+  });
   inputs[0].props.onChange({ target: { value: "这段代码" } });
   t = rerender(registered.Component, props);
   insBtn = findBtnByText(t, "插入");
   check("填了必填后插入按钮可用", insBtn?.props?.disabled === false);
-  insBtn.props.onClick();
-  check("表单提交后插入渲染结果", inserted[0] === "请审查 这段代码，关注 正确性。", inserted[0]);
+  const readyFillForm = allNodes(panelOf(t)).find((n) => n?.props?.id === "ps-fill-form");
+  let fillShortcutPrevented = 0;
+  let fillShortcutStopped = 0;
+  emptyFormKeyCleanup?.();
+  const readyFormKeyEffect = effects.find((entry) => entry.fn.toString().includes("inPanel && filling"));
+  const readyFormKeyCleanup = readyFormKeyEffect?.fn();
+  window._handlers.keydown?.({
+    target: { closest: (selector) => selector === "#ps-panel" ? {} : null },
+    key: "Enter", ctrlKey: true, metaKey: false,
+    preventDefault: () => { fillShortcutPrevented++; },
+    stopPropagation: () => { fillShortcutStopped++; },
+  });
+  check("填写表单 Ctrl+Enter 插入渲染结果", inserted[0] === "请审查 这段代码，关注 正确性。", inserted[0]);
+  check("填写表单 Ctrl+Enter 调用宿主发送", submitted === submitsBeforeBlockedShortcut + 1);
+  check("填写表单 Ctrl+Enter 阻止宿主抢占", fillShortcutPrevented === 1 && fillShortcutStopped === 1);
+  readyFormKeyCleanup?.();
+  window.addEventListener = realWindowAddForFill;
   check("插入后关闭面板", !panelOf(rerender(registered.Component, props)));
 
   // 保留占位符插入
@@ -374,7 +447,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   editBtn.props.onClick();
   t = rerender(registered.Component, props);
   let eTxt = flat(panelOf(t)).filter((x) => typeof x === "string");
-  check("展开行内编辑器", eTxt.includes("名称") && eTxt.includes("正文（用 {{变量名}} 标记占位符，\\{{ 输出字面量）"));
+  check("展开行内编辑器", eTxt.includes("名称") && eTxt.some((text) => text.includes("正文（用 {{变量名}}")), eTxt.join("|"));
   check("编辑器带出原值", allNodes(panelOf(t)).some((n) => n?.props?.value === "带必填"));
   check("编辑器列出变量", eTxt.includes("{{代码}}") && eTxt.includes("{{关注点}}"));
   // 编辑器里现在有多个 checkbox（收藏置顶 + 每个变量的必填），必须按「checked 为 true」定位
@@ -1080,14 +1153,20 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   starBtn(t).props.onClick();
   await waitTick();
   t = rerender(registered.Component, props);
-  const search = flat(panelOf(t)).find((n) => n?.props?.placeholder?.includes("搜索"));
-  search.props.onKeyDown({ key: "Escape" });
+  const realWindowAddForEscape = window.addEventListener;
+  const realWindowRemoveForEscape = window.removeEventListener;
+  const dispatchPanelEscape = (currentTree) => {
+    const searchInput = flat(panelOf(currentTree)).find((node) => node?.props?.placeholder?.includes("搜索"));
+    searchInput?.props?.onKeyDown?.({ key: "Escape", preventDefault() {}, stopPropagation() {} });
+  };
+  dispatchPanelEscape(t);
   t = rerender(registered.Component, props);
-  check("Escape 第一层只收对比视图", !textsOf(t).some((s) => s.includes("优化后")) && !!panelOf(t));
-  const search2 = flat(panelOf(t)).find((n) => n?.props?.placeholder?.includes("搜索"));
-  search2.props.onKeyDown({ key: "Escape" });
+  check("Escape 第一层只收对比视图", !textsOf(t).some((s) => s.includes("优化后")) && !!panelOf(t), textsOf(t).slice(0, 10).join("|"));
+  dispatchPanelEscape(t);
   t = rerender(registered.Component, props);
-  check("Escape 第二层收起面板", !panelOf(t));
+  check("Escape 第二层收起面板", !panelOf(t), textsOf(t).slice(0, 10).join("|"));
+  window.addEventListener = realWindowAddForEscape;
+  window.removeEventListener = realWindowRemoveForEscape;
 
   // —— 无默认模型：✨ 直接置灰，title 说明原因 ——
   capReply = { ok: true, value: { optimize: { available: false, reason: "未配置默认模型，无法优化" } } };
@@ -1217,6 +1296,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   const itemBtn = flat(x).find((n) => n?.props?.className === "ps-item" && n?.props?.style?.background);
   check("§3.2 选中项有 itemSelected 背景", !!itemBtn);
 
+
   // 5) Enter 插入选中项（关面板 + touch）
   const beforeTouch = calls.filter((c) => c.endpoint === "touch").length;
   inputOf(x).props.onKeyDown({ key: "Enter", preventDefault: () => {} });
@@ -1240,7 +1320,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   check("§3.2 点新建展开编辑器", hasEditor);
 
   // 7) Esc 优先退出编辑态再清 query，而不是直接关面板
-  inputOf(x).props.onKeyDown({ key: "Escape", preventDefault: () => {} });
+  inputOf(x).props.onKeyDown({ key: "Escape", preventDefault: () => {}, stopPropagation: () => {} });
   x = rerender(registered.Component, props);
   check("§3.2 Esc 先退编辑态（面板仍在）", !!x.children.find((c) => c?.props?.id === "ps-panel"));
 }
@@ -1405,21 +1485,36 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
 
   // 收集全局 keydown handler
   const keyHandlers = [];
-  const realAdd = document.addEventListener;
-  const realRem = document.removeEventListener;
-  document.addEventListener = (type, fn) => { if (type === "keydown") keyHandlers.push(fn); };
-  document.removeEventListener = () => {};
+  const realWindowAdd = window.addEventListener;
+  const realWindowRem = window.removeEventListener;
+  window.addEventListener = (type, fn, capture) => {
+    if (type === "keydown") {
+      keyHandlers.push({ fn, capture });
+      window._handlers[type] = fn;
+    }
+  };
+  window.removeEventListener = (type, fn) => {
+    if (window._handlers[type] === fn) delete window._handlers[type];
+  };
 
   let x = await reloadPalette();
   // 触发挂载 keydown effect（reloadPalette 内部 rerender 已重跑 effect，但 test harness 不自动执行 effect）
   // 手动执行所有 effect 来注册 keydown handler
-  for (const e of effects) { try { e.fn(); } catch (_) {} }
-  // 找到 Ctrl+Shift+K 的 handler
-  const openHandler = keyHandlers.find((fn) => fn.toString().includes("shiftKey"));
-  check("v1.3 命令面板注册了全局唤起快捷键", typeof openHandler === "function");
+  let shortcutCleanup = null;
+  for (const e of effects) {
+    try {
+      const cleanup = e.fn();
+      if (e.fn.toString().includes("shortcuts.register")) shortcutCleanup = cleanup;
+    } catch (_) {}
+  }
+  const paletteShortcut = shortcutRegistrations.find((command) => command.id === "prompt-snippets.open-palette");
+  check("DSH 快捷键服务注册片段搜索", !!paletteShortcut);
+  check("快捷键默认值使用 Ctrl/Cmd+Shift+K", paletteShortcut?.defaults?.["desktop:windows"]?.code === "KeyK" && paletteShortcut?.defaults?.["desktop:windows"]?.modifiers?.includes("primary"));
+  check("Linux Web 不声明不支持的默认键位", !("web:linux" in (paletteShortcut?.defaults || {})));
 
-  // 模拟 Ctrl+Shift+K（修复后按物理键位 code 判断，Shift 会把 key 变成大写 "K"）
-  openHandler?.({ key: "K", code: "KeyK", ctrlKey: true, shiftKey: true, preventDefault: () => {} });
+  // 从 DSH 命令注册项触发，覆盖桌面原生快捷键分发路径。
+  const shortcutResult = paletteShortcut?.resolve({ region: "page", modal: null, target: null });
+  check("DSH 同步 resolve 立即处理快捷键", shortcutResult?.status === "handled");
   x = rerender(registered.Component, props);
   const overlay = paletteOf(x);
   check("v1.3 命令面板打开后渲染 overlay", !!overlay);
@@ -1433,15 +1528,39 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   const pTexts2 = textsOfP(x);
   check("v1.3 命令面板支持搜索过滤", pTexts2.includes("乙") && !pTexts2.includes("甲"));
 
+  const enabledPaletteEscape = keyHandlers.find((entry) => entry.capture === true && entry.fn.toString().includes("inPalette"))?.fn;
+  let paletteEscapePrevented = 0;
+  let paletteEscapeStopped = 0;
+  enabledPaletteEscape?.({ target: { closest: (selector) => selector === "#ps-palette" ? {} : null }, key: "Escape", preventDefault: () => { paletteEscapePrevented += 1; }, stopPropagation: () => { paletteEscapeStopped += 1; } });
+  x = rerender(registered.Component, props);
+  check("命令面板 Escape 关闭窗口", !paletteOf(x) && paletteEscapePrevented === 1 && paletteEscapeStopped === 1);
+
+  paletteShortcut?.resolve({ region: "page", modal: null, target: null });
+  x = rerender(registered.Component, props);
+
   // Enter 插入第一条
   const pinput2 = inputOfP(x);
   const beforeInserts = inserted.length;
-  pinput2?.props?.onKeyDown?.({ key: "Enter", preventDefault: () => {} });
+  pinput2?.props?.onKeyDown?.({ key: "Enter", preventDefault: () => {}, stopPropagation: () => {} });
   await new Promise((r) => setImmediate(r));
   check("v1.3 命令面板 Enter 插入命中片段", inserted.length === beforeInserts + 1);
 
-  document.addEventListener = realAdd;
-  document.removeEventListener = realRem;
+  // 重新打开，验证 Ctrl+Enter 和 Escape 在捕获阶段工作。
+  let prevented = 0;
+  let stopped = 0;
+  const submitsBeforePaletteShortcut = submitted;
+  const globalHandler = keyHandlers.find((entry) => entry.capture === true && entry.fn.toString().includes("inPalette"))?.fn;
+  globalHandler?.({ target: { closest: (selector) => selector === "#ps-palette" ? {} : null }, key: "Enter", ctrlKey: true, metaKey: false, preventDefault: () => { prevented += 1; }, stopPropagation: () => { stopped += 1; } });
+  await new Promise((r) => setImmediate(r));
+  check("命令面板 Ctrl+Enter 插入并调用宿主提交", inserted.length >= beforeInserts + 2 && submitted === submitsBeforePaletteShortcut + 1);
+  check("命令面板 Ctrl+Enter 阻止宿主抢占", prevented === 1 && stopped === 1);
+
+  shortcutCleanup?.();
+  check("组件卸载时注销 DSH 快捷键", shortcutDisposals === 1);
+
+  window.addEventListener = realWindowAdd;
+  window.removeEventListener = realWindowRem;
+  x = rerender(registered.Component, props);
   fakeRpc.call = realCall;
 }
 

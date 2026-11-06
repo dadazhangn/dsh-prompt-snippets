@@ -60,6 +60,15 @@ window.__ModuleLoader__.load({
       "fill.cancel": "取消",
       "fill.keepRaw": "保留占位符插入",
       "fill.insert": "插入",
+      "fill.keyboardHint": "Tab / Shift+Tab 切换变量 · Ctrl+Enter 插入并发送 · Esc 取消",
+      "help.title": "快捷键与键盘操作",
+      "help.open": "快捷键帮助",
+      "help.close": "关闭快捷键帮助",
+      "help.navigation": "方向键：选择片段 · Enter：插入或打开占位符表单",
+      "help.fill": "Tab / Shift+Tab：切换变量 · Ctrl+Enter：插入并发送 · 必填项缺失时跳到待填写项",
+      "help.escape": "Esc：关闭当前帮助、表单、搜索面板或插件窗口",
+      "help.palette": "Ctrl+Shift+K：打开快捷搜索",
+      "help.send": "插入只会放入聊天输入框；发送会提交当前消息。",
       "review.overLong": "优化结果超过单条片段上限，请先精简",
       "review.replacePrompt": "把片段正文替换成优化后的版本",
       "review.original": "原文",
@@ -96,7 +105,7 @@ window.__ModuleLoader__.load({
       "palette.empty": "还没有片段，点 dock 的「＋ 新建」保存一个。",
       "palette.noMatch": "没有匹配「{query}」的片段。",
       "palette.noCategory": "（无分类）",
-      "palette.hint": "↑↓ 选择 · Enter 插入 · Ctrl+Enter 插入并发送 · Esc 关闭 · Ctrl+Shift+K 唤起",
+      "palette.hint": "↑↓ 选择 · Enter 插入 · Ctrl+Enter 提交 · Esc 关闭 · Ctrl+Shift+K 唤起",
       "history.loading": "加载中…",
       "history.empty": "暂无历史版本（每次保存前的内容会留档，最多 20 版）",
       "history.insertTitle": "把这一版的内容插入输入框",
@@ -138,7 +147,8 @@ window.__ModuleLoader__.load({
       "panel.openFile": "打开",
       "panel.openFileTitle": "在系统文件管理器中打开这个文件",
       "panel.undoAll": "全部撤销",
-      "panel.footer": "点名称插入 · ✏️ 编辑 · ✨ 优化 · 🗑 删除 · 拖标题栏移动 · 拖边缘调大小",
+      "panel.footer": "Esc 关闭 · ↑↓ 选择 · Enter 插入 · Ctrl+Shift+K 打开快捷搜索 · 点名称插入 · ✏️ 编辑 · ✨ 优化 · 🗑 删除 · 拖标题栏移动 · 拖边缘调大小",
+      "shortcut.openPalette": "打开片段快捷搜索",
     };
     const en = {
       "error.unknown": "Unknown error",
@@ -191,6 +201,15 @@ window.__ModuleLoader__.load({
       "fill.cancel": "Cancel",
       "fill.keepRaw": "Insert with placeholders",
       "fill.insert": "Insert",
+      "fill.keyboardHint": "Tab / Shift+Tab move between fields · Ctrl+Enter insert & send · Esc cancel",
+      "help.title": "Keyboard shortcuts",
+      "help.open": "Keyboard shortcuts",
+      "help.close": "Close keyboard shortcuts",
+      "help.navigation": "Arrow keys: select a snippet · Enter: insert or open its fill form",
+      "help.fill": "Tab / Shift+Tab: move between fields · Ctrl+Enter: insert and send · Missing required fields receive focus",
+      "help.escape": "Esc: close the current help, form, search, or plugin window",
+      "help.palette": "Ctrl+Shift+K: open quick search",
+      "help.send": "Insert places text in the chat composer; Send submits the message.",
       "review.overLong": "Optimized result exceeds the snippet length limit — please shorten first",
       "review.replacePrompt": "Replace the snippet content with the optimized version",
       "review.original": "Original",
@@ -227,7 +246,7 @@ window.__ModuleLoader__.load({
       "palette.empty": "No snippets yet — click \"＋ New\" on the dock to save one.",
       "palette.noMatch": "No snippets matching \"{query}\".",
       "palette.noCategory": "(no category)",
-      "palette.hint": "↑↓ Select · Enter Insert · Ctrl+Enter Insert & Send · Esc Close · Ctrl+Shift+K Open",
+      "palette.hint": "↑↓ Select · Enter Insert · Ctrl+Enter Submit · Esc Close · Ctrl+Shift+K Open",
       "history.loading": "Loading…",
       "history.empty": "No history yet (each save keeps the previous version, up to 20)",
       "history.insertTitle": "Insert this version's content into the composer",
@@ -269,7 +288,8 @@ window.__ModuleLoader__.load({
       "panel.openFile": "Open",
       "panel.openFileTitle": "Open this file in the system file manager",
       "panel.undoAll": "Undo all",
-      "panel.footer": "Click name to insert · ✏️ Edit · ✨ Optimize · 🗑 Delete · Drag title to move · Drag edge to resize",
+      "panel.footer": "Esc Close · ↑↓ Select · Enter Insert · Ctrl+Shift+K Open quick search · Click name to insert · ✏️ Edit · ✨ Optimize · 🗑 Delete · Drag title to move · Drag edge to resize",
+      "shortcut.openPalette": "Open snippet quick search",
     };
 
     // 样式插入走两条路：优先平台 seed builtin `styles`（自带生命周期清理），
@@ -1243,7 +1263,7 @@ window.__ModuleLoader__.load({
     /** 与 host 侧 MAX_CONTENT 一致：编辑后实时重算是否超长，不能只信 host 首次返回的 truncated。 */
     const MAX_CONTENT = 200_000;
 
-    function SnippetDock({ inputActions, rpc, t, localeSubscribe }) {
+    function SnippetDock({ inputActions, rpc, t, localeSubscribe, shortcuts }) {
       // locale 切换时强制重渲染（t 是外部绑定的纯函数，不会随 locale 自动更新）。
       // 用 useState 而非 useEffect，避免 hook 槽位偏移影响既有测试。
       const [, setLocaleRev] = useState(0);
@@ -1273,6 +1293,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState(null); // 短暂提示（默认值填充等），关面板后仍可见
       const [editing, setEditing] = useState(null); // 行内编辑草稿
       const [filling, setFilling] = useState(null); // 占位符表单 { snippet, values }
+      const [helpOpen, setHelpOpen] = useState(false);
       const [view, setView] = useState("all"); // v1.3 视图切换：all / pinned / recent
       const [history, setHistory] = useState(null); // v1.3 版本历史面板 { id, list, busy }
       // v1.3 命令面板：全局快捷唤起（Ctrl+Shift+K / Ctrl+Shift+P），独立于 dock 面板
@@ -1281,6 +1302,10 @@ window.__ModuleLoader__.load({
       const [paletteSelected, setPaletteSelected] = useState(-1);
       const paletteInputRef = useRef(null);
       const paletteListRef = useRef(null);
+      const openPaletteRef = useRef(null);
+      const helpButtonRef = useRef(null);
+      const helpCloseRef = useRef(null);
+      const lastComposerFocusRef = useRef(null);
       const searchRef = useRef(null);
       const nameRef = useRef(null);
       // 面板 DOM 引用：拖拽/缩放期间直接改 style.left/top/width/height，
@@ -1317,41 +1342,6 @@ window.__ModuleLoader__.load({
         return localeSubscribe(() => setLocaleRev((n) => n + 1));
       }, [localeSubscribe]);
 
-      // ── v1.3 命令面板：全局快捷唤起 Ctrl+Shift+K / Ctrl+Shift+P ──
-      // 打开时把 dock 面板关掉，避免两个入口打架；focus 交给 palette input。
-      useEffect(() => {
-        if (!paletteOpen) return;
-        const onKey = (e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            setPaletteOpen(false);
-          }
-        };
-        document.addEventListener("keydown", onKey, true);
-        setTimeout(() => {
-          if (paletteInputRef.current) paletteInputRef.current.focus();
-        }, 0);
-        return () => document.removeEventListener("keydown", onKey, true);
-      }, [paletteOpen]);
-
-      useEffect(() => {
-        const onKey = (e) => {
-          // 用 e.code（物理键位）而非 e.key：Shift+K 会让 e.key 变成大写 "K"，
-          // 导致 Ctrl+Shift+K 永远匹配不到小写 "k"。
-          if (e.code === "KeyK" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
-            e.preventDefault();
-            setPaletteOpen(true);
-            setOpen(false);
-          } else if (e.code === "KeyP" && (e.ctrlKey || e.metaKey) && e.shiftKey) {
-            e.preventDefault();
-            setPaletteOpen(true);
-            setOpen(false);
-          }
-        };
-        document.addEventListener("keydown", onKey);
-        return () => document.removeEventListener("keydown", onKey);
-      }, []);
-
       // 命令面板结果：按名称/分类/标签搜索；清空时列出全部（有收藏的置顶）。
       const paletteResults = useMemo(() => {
         const q = paletteQuery.trim().toLowerCase();
@@ -1382,22 +1372,171 @@ window.__ModuleLoader__.load({
       }, [paletteOpen, paletteSelected]);
 
       const _openPalette = () => {
+        const active = document.activeElement;
+        if (
+          active &&
+          (active.isContentEditable === true || active.matches?.("input, textarea, [contenteditable='true'], [role='textbox']")) &&
+          !active.closest?.("#ps-panel, #ps-palette")
+        ) lastComposerFocusRef.current = active;
         setPaletteQuery("");
         setPaletteSelected(-1);
         setPaletteOpen(true);
         setOpen(false);
       };
 
-      const closePalette = () => {
+      openPaletteRef.current = _openPalette;
+
+      // Native-aware registration lets Desktop dispatch shortcuts that never reach DOM keydown.
+      useEffect(() => {
+        if (!shortcuts || typeof shortcuts.register !== "function") return;
+        return shortcuts.register({
+          id: "prompt-snippets.open-palette",
+          label: () => t("shortcut.openPalette"),
+          aliases: ["prompt snippets", "snippet search"],
+          defaults: {
+            "desktop:macos": { code: "KeyK", modifiers: ["primary", "shift"] },
+            "desktop:windows": { code: "KeyK", modifiers: ["primary", "shift"] },
+            "desktop:linux": { code: "KeyK", modifiers: ["primary", "shift"] },
+            "web:macos": { code: "KeyK", modifiers: ["primary", "shift"] },
+            "web:windows": { code: "KeyK", modifiers: ["primary", "shift"] },
+          },
+          regions: ["page", "editable"],
+          modals: [],
+          resolve: () => {
+            if (openPaletteRef.current) openPaletteRef.current();
+            return { status: "handled" };
+          },
+        });
+      }, [shortcuts]);
+
+      const closePalette = (restoreFocus = false) => {
         setPaletteOpen(false);
         setPaletteQuery("");
         setPaletteSelected(-1);
+        if (restoreFocus) setTimeout(() => restoreComposerFocus(), 0);
+      };
+
+      const closeHelp = () => {
+        setHelpOpen(false);
+        setTimeout(() => helpButtonRef.current?.focus?.(), 0);
+      };
+
+      const cancelFill = () => {
+        setFilling(null);
+        setTimeout(() => searchRef.current?.focus?.(), 0);
+      };
+
+      const restoreComposerFocus = () => {
+        const target = lastComposerFocusRef.current;
+        if (!target || target.isConnected === false) return;
+        target.focus?.();
+      };
+
+      const closePanel = () => {
+        setOpen(false);
+        setTimeout(() => restoreComposerFocus(), 0);
       };
 
       const paletteChoose = (snippet, sendAfter = false) => {
         closePalette();
         insert(snippet, sendAfter);
       };
+
+      const handlePanelEscape = () => {
+        if (helpOpen) closeHelp();
+        else if (importOpen) setImportOpen(false);
+        else if (review) {
+          if (review.busy) stopOptimize();
+          else setReview(null);
+        } else if (filling) cancelFill();
+        else if (editing) cancelEdit();
+        else if (history) setHistory(null);
+        else if (query) setQuery("");
+        else {
+          closePanel();
+        }
+      };
+
+      // Esc 与 Ctrl+Enter 只在插件面板内处理；搜索唤起交给 DSH 快捷键服务。
+      useEffect(() => {
+        const onKey = (e) => {
+          const target = e.target;
+          const inPalette = !!(target && target.closest && target.closest("#ps-palette"));
+          const inPanel = !!(target && target.closest && target.closest("#ps-panel"));
+
+          if (inPalette && e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            closePalette(true);
+            return;
+          }
+          if (inPalette && e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            const pick = paletteSelected >= 0 ? paletteResults[paletteSelected] : paletteResults[0];
+            if (!pick) return;
+            e.preventDefault();
+            e.stopPropagation();
+            paletteChoose(pick, true);
+            return;
+          }
+          if (inPanel && filling && e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            e.stopPropagation();
+            submitFill(true);
+            return;
+          }
+
+          if (inPanel && helpOpen) {
+            if (e.key === "Tab") {
+              e.preventDefault();
+              helpCloseRef.current?.focus?.();
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              closeHelp();
+              return;
+            }
+          }
+
+          if ((inPanel || open) && e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            handlePanelEscape();
+            return;
+          }
+
+        };
+        window.addEventListener("keydown", onKey, true);
+        const isComposer = (target) => target && (
+          target.isContentEditable === true ||
+          target.matches?.("input, textarea, [contenteditable='true'], [role='textbox']")
+        );
+        const rememberComposer = (e) => {
+          const target = e.target;
+          if (isComposer(target) && !target.closest?.("#ps-panel, #ps-palette") && typeof target.focus === "function") {
+            lastComposerFocusRef.current = target;
+          }
+        };
+        document.addEventListener("focusin", rememberComposer, true);
+        const active = document.activeElement;
+        if (isComposer(active) && !active.closest?.("#ps-panel, #ps-palette") && typeof active.focus === "function") {
+          lastComposerFocusRef.current = active;
+        }
+        if (paletteOpen) {
+          setTimeout(() => {
+            if (paletteInputRef.current) paletteInputRef.current.focus();
+          }, 0);
+        }
+        return () => {
+          window.removeEventListener("keydown", onKey, true);
+          document.removeEventListener("focusin", rememberComposer, true);
+        };
+      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, review, filling, editing, history, query, helpOpen]);
+
+      useEffect(() => {
+        if (helpOpen) setTimeout(() => helpCloseRef.current?.focus?.(), 0);
+      }, [helpOpen]);
 
       // §3.1：启动时问一次模型可用性。拿不到就不降级为「假装可用」——
       // 保持预置的可用状态，让点击时的错误提示兜底（老 host 没有这个字段）。
@@ -1615,7 +1754,7 @@ window.__ModuleLoader__.load({
         Promise.resolve(rpc.call(CHANNEL, "touch", { ids: [snippetId] })).catch(() => {});
       };
 
-      // 发送当前草稿（Ctrl+Enter 插入并发送时调用；失败不打断，交给用户手动补救）。
+      // Ctrl+Enter 插入后调用 DSH 提交动作；宿主决定实际发送行为。
       const submitDraft = () => {
         try {
           inputActions.submit();
@@ -1625,12 +1764,11 @@ window.__ModuleLoader__.load({
       };
 
       // ────────── 插入：直插 / 按默认值插 / 弹表单 ──────────
-      // sendAfter：插入成功后立即发送草稿。带必填占位符的片段仍需先填表单，
-      // 无法自动发送，此时降级为「弹表单、填完手动发送」。
+      // sendAfter：插入成功后提交草稿。带必填占位符时先弹表单，填完由用户提交。
       const insert = (snippet, sendAfter = false) => {
         const plan = fillPlan(snippet);
         if (plan.kind === "form") {
-          setFilling({ snippet, values: {} });
+          setFilling({ snippet, values: {}, sendAfter });
           setError(null);
           // 从命令面板（palette）触发时主面板是关闭的，表单渲染在 open 面板内部，
           // 必须同时打开主面板并定位，否则「按回车后表单被吞」。
@@ -1657,18 +1795,37 @@ window.__ModuleLoader__.load({
         } else if (plan.kind === "defaults") {
           setNotice(t("notice.defaultsFilled"));
         }
+        setTimeout(() => restoreComposerFocus(), 0);
       };
 
       const setFillValue = (name, value) => {
         setFilling((prev) => (prev ? { ...prev, values: { ...prev.values, [name]: value } } : prev));
       };
 
-      const submitFill = () => {
+      const fillInputRefs = useRef(Object.create(null));
+
+      // Open the fill form directly into the first required field so keyboard
+      // users can start typing immediately. Depend on the snippet identity so
+      // value updates do not steal focus back from the field being edited.
+      useEffect(() => {
+        if (!filling) return;
+        const names = varNamesOf(filling.snippet.content).filter((name) => !isDynamic(name));
+        const vars = filling.snippet.variables || {};
+        const firstRequired = names.find((name) => vars[name]?.required === true);
+        const target = firstRequired || names[0];
+        if (!target) return;
+        setTimeout(() => fillInputRefs.current[target]?.focus?.(), 0);
+      }, [filling && filling.snippet.id]);
+
+      const submitFill = (sendAfter = false) => {
         const cur = filling;
         if (!cur) return;
         const { tokens } = scanPlaceholders(cur.snippet.content);
         const { text, missing } = renderContent(tokens, cur.snippet.variables || {}, cur.values);
-        if (missing.length > 0) return; // 按钮已禁用，这里只是兜底
+        if (missing.length > 0) {
+          if (sendAfter) fillInputRefs.current[missing[0]]?.focus?.();
+          return; // 按钮已禁用，这里只是兜底
+        }
         if (!insertText(text)) {
           setError(t("error.insertFailed"));
           return;
@@ -1677,6 +1834,8 @@ window.__ModuleLoader__.load({
         setFilling(null);
         setError(null);
         setOpen(false);
+        if (cur.sendAfter || sendAfter) submitDraft();
+        setTimeout(() => restoreComposerFocus(), 0);
       };
 
       const insertRaw = () => {
@@ -1690,6 +1849,7 @@ window.__ModuleLoader__.load({
         setFilling(null);
         setError(null);
         setOpen(false);
+        setTimeout(() => restoreComposerFocus(), 0);
       };
 
       // ────────── 行内编辑 ──────────
@@ -2417,7 +2577,10 @@ window.__ModuleLoader__.load({
         const blocked = missing.length > 0;
         return h(
           "div",
-          { style: style.editor },
+          {
+            id: "ps-fill-form",
+            style: style.editor,
+          },
           h("div", { style: style.label }, `填写「${cur.snippet.name}」的占位符`),
           names.map((nm) => {
             const d = vars[nm] || {};
@@ -2429,6 +2592,10 @@ window.__ModuleLoader__.load({
             // 单行 input 会吃掉换行，粘贴多行代码/会议记录没法看。
             const multiline =
               /代码|code|原文|记录|要点|说明|内容|text|body/i.test(nm) || (typeof val === "string" && val.includes("\n"));
+            const inputRef = (el) => {
+              if (el) fillInputRefs.current[nm] = el;
+              else delete fillInputRefs.current[nm];
+            };
             return h(
               "label",
               { key: nm, style: style.field },
@@ -2437,6 +2604,7 @@ window.__ModuleLoader__.load({
                 ? h(
                   "select",
                   {
+                    ref: inputRef,
                     className: "ps-select",
                     style: style.select,
                     value: val,
@@ -2448,6 +2616,7 @@ window.__ModuleLoader__.load({
                 )
                 : multiline
                   ? h("textarea", {
+                    ref: inputRef,
                     className: "ps-textarea",
                     style: { ...style.textarea, minHeight: "54px" },
                     value: val,
@@ -2456,6 +2625,7 @@ window.__ModuleLoader__.load({
                   })
                   : h("input", {
                     type: "text",
+                    ref: inputRef,
                     className: "ps-input",
                     style: style.input,
                     value: val,
@@ -2464,12 +2634,13 @@ window.__ModuleLoader__.load({
                   }),
             );
           }),
+          h("div", { style: style.hintInline }, t("fill.keyboardHint")),
           h(
             "div",
             { style: style.actions },
             h(
               "button",
-              { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => setFilling(null) },
+              { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: cancelFill },
               t("fill.cancel"),
             ),
             h(
@@ -2780,7 +2951,7 @@ window.__ModuleLoader__.load({
         if (!paletteOpen) return null;
         return h(
           "div",
-          { style: style.paletteOverlay, onMouseDown: (e) => { if (e.target === e.currentTarget) closePalette(); } },
+          { id: "ps-palette", style: style.paletteOverlay, onMouseDown: (e) => { if (e.target === e.currentTarget) closePalette(true); } },
           h(
             "div",
             { style: style.paletteBox },
@@ -2796,6 +2967,11 @@ window.__ModuleLoader__.load({
                 setPaletteSelected(-1);
               },
               onKeyDown: (e) => {
+                if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  return;
+                }
                 if (e.key === "ArrowDown") {
                   e.preventDefault();
                   if (paletteResults.length === 0) return;
@@ -2807,11 +2983,11 @@ window.__ModuleLoader__.load({
                 } else if (e.key === "Enter") {
                   e.preventDefault();
                   const pick = paletteSelected >= 0 ? paletteResults[paletteSelected] : paletteResults[0];
-                  // Enter 插入；Ctrl+Enter / Meta+Enter 插入并立即发送。
+                  // Enter 插入；Ctrl+Enter / Meta+Enter 插入并提交。
                   if (pick) paletteChoose(pick, e.ctrlKey || e.metaKey);
                 } else if (e.key === "Escape") {
                   e.preventDefault();
-                  closePalette();
+                  closePalette(true);
                 }
               },
             }),
@@ -3001,16 +3177,69 @@ window.__ModuleLoader__.load({
                 "button",
                 {
                   type: "button",
+                  className: "ps-ghost",
+                  style: { ...style.btnGhost, padding: "3px 8px", lineHeight: "18px" },
+                  ref: helpButtonRef,
+                  title: t("help.open"),
+                  "aria-label": t("help.open"),
+                  "aria-expanded": helpOpen ? "true" : "false",
+                  onMouseDown: (e) => e.stopPropagation(),
+                  onClick: () => setHelpOpen(true),
+                },
+                "?",
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
                   className: "ps-close",
                   style: style.close,
                   title: t("panel.close"),
                   "aria-label": t("panel.closeAria"),
                   onMouseDown: (e) => e.stopPropagation(),
-                  onClick: () => setOpen(false),
+                  onClick: closePanel,
                 },
                 "×",
               ),
             ),
+            helpOpen
+              ? h(
+                "div",
+                {
+                  role: "dialog",
+                  "aria-modal": "true",
+                  "aria-label": t("help.title"),
+                  style: {
+                    position: "absolute",
+                    zIndex: 3,
+                    inset: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                    padding: "20px",
+                    background: C.surface,
+                    color: C.text,
+                  },
+                  onMouseDown: (e) => e.stopPropagation(),
+                },
+                h("div", { style: { fontSize: "15px", fontWeight: 650 } }, t("help.title")),
+                ["help.palette", "help.navigation", "help.fill", "help.escape", "help.send"].map((key) =>
+                  h("div", { key, style: { fontSize: "13px", lineHeight: 1.5, color: C.textDim } }, t(key)),
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "ps-primary",
+                    style: { ...style.btnPrimary, alignSelf: "flex-end", marginTop: "auto" },
+                    ref: helpCloseRef,
+                    "aria-label": t("help.close"),
+                    onClick: closeHelp,
+                  },
+                  t("help.close"),
+                ),
+              )
+              : null,
             warning ? h("div", { className: "ps-warn", style: style.warn }, "⚠ " + warning) : null,
             h(
               "div",
@@ -3031,7 +3260,7 @@ window.__ModuleLoader__.load({
                   },
                   onMouseDown: (e) => e.stopPropagation(),
                   onKeyDown: (e) => {
-                    // §3.2 键盘导航：↑↓ 移动选中，Enter 插入选中，Esc 分层退出
+                    // §3.2 键盘导航：↑↓ 移动选中，Enter 插入选中；Esc 由捕获阶段全局处理
                     if (e.key === "ArrowDown") {
                       e.preventDefault();
                       if (visible.length === 0) return;
@@ -3049,15 +3278,11 @@ window.__ModuleLoader__.load({
                       if (selectedSnippet) insert(selectedSnippet);
                       return;
                     }
-                    if (e.key !== "Escape") return;
-                    // 有表单/草稿/对比视图时先退一层，不直接关面板
-                    if (review) {
-                      if (review.busy) stopOptimize();
-                      else setReview(null);
-                    } else if (filling) setFilling(null);
-                    else if (editing) cancelEdit();
-                    else if (query) setQuery("");
-                    else setOpen(false);
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handlePanelEscape();
+                    }
                   },
                 }),
                 query.trim()
@@ -3265,7 +3490,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ["slots", "connection", "locale"],
+      inject: ["slots", "connection", "locale", "shortcuts"],
       apply(ctx) {
         ctx.effect(() => mountCss(THEME_CSS, "dsh-prompt-snippets/theme.css"), "prompt-snippets theme");
         const rpc = ctx.connection.rpc;
@@ -3289,7 +3514,7 @@ window.__ModuleLoader__.load({
               name: "conversation.input.right",
               id: "prompt-snippets",
               order: 10,
-              inject: () => ({ rpc, t, localeSubscribe }),
+              inject: () => ({ rpc, t, localeSubscribe, shortcuts: ctx.shortcuts }),
             },
             SnippetDock,
           ),
