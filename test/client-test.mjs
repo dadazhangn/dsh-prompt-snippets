@@ -1265,7 +1265,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   // 右上角不再有 resize 把手，避免挡住关闭按钮
   check("右上角无 nesw-resize 把手", !flat(x).some((n) => n?.props?.style?.cursor === "nesw-resize" && n?.props?.style?.right === 0 && n?.props?.style?.top === 0));
 
-  // 默认尺寸：无自定义时沿用 min(340px, calc(100vw-16px)) 收窄
+  // 默认尺寸：无自定义时沿用 min(380px, calc(100vw-16px)) 收窄
   const p0 = panelOf(x);
   check("默认宽度用 min() 收窄", (p0?.props?.style?.width || "").includes("min("), p0?.props?.style?.width);
 
@@ -1289,12 +1289,12 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   moves.forEach((fn) => fn({ clientX: 180, clientY: 220 }));
   x = rerender(registered.Component, props);
   const p1 = panelOf(x);
-  check("se 拖拽后宽度变为自定义 px", p1?.props?.style?.width === "420px", String(p1?.props?.style?.width));
+  check("se 拖拽后宽度变为自定义 px", p1?.props?.style?.width === "460px", String(p1?.props?.style?.width));
   check("se 拖拽后高度变为自定义 px", p1?.props?.style?.height === "560px", String(p1?.props?.style?.height));
 
   ups.forEach((fn) => fn({ clientX: 180, clientY: 220 }));
   x = rerender(registered.Component, props);
-  check("松手后尺寸写入 localStorage", (JSON.parse(localStorage._v["dsh-prompt-snippets-panel-size"] || "{}") || {}).w === 420);
+  check("松手后尺寸写入 localStorage", (JSON.parse(localStorage._v["dsh-prompt-snippets-panel-size"] || "{}") || {}).w === 460);
 
   // 关→开：自定义尺寸被读回
   x.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
@@ -1302,7 +1302,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   x.children.find((c) => c?.props?.id === "ps-button").props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
   x = rerender(registered.Component, props);
   const p2 = panelOf(x);
-  check("重开后读回自定义尺寸", p2?.props?.style?.width === "420px", String(p2?.props?.style?.width));
+  check("重开后读回自定义尺寸", p2?.props?.style?.width === "460px", String(p2?.props?.style?.width));
 }
 
 // ── v1.3 标签 / 收藏 / 视图切换 / 版本历史 ──
