@@ -29,6 +29,8 @@ let plugin = null;
 global.window = {
   __ModuleLoader__: { load: ({ factory }) => { plugin = factory((s) => { if (s === "react") return React; throw new Error("require " + s); }); } },
   innerWidth: 1400, innerHeight: 900,
+  addEventListener() {},
+  removeEventListener() {},
 };
 global.localStorage = { _v: {}, getItem(k) { return this._v[k] ?? null; }, setItem(k, v) { this._v[k] = v; } };
 const headTags = [];

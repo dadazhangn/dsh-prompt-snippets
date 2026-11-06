@@ -74,6 +74,8 @@ let subscriptions = 0;
 const localeSubscribe = () => { subscriptions++; return () => { subscriptions--; }; };
 const win = {
   innerWidth: 1400, innerHeight: 900,
+  addEventListener() {},
+  removeEventListener() {},
   __ModuleLoader__: { load({ factory }) {
     const plugin = factory((id) => {
       assert.equal(id, "react");
