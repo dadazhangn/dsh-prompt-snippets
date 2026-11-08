@@ -16,6 +16,8 @@ Prompt Snippets 是为 [DeepSeek Harness（DSH）](https://github.com/awesome-ds
 
 面板可以直接浏览、编辑和整理片段，不用离开当前对话。也可以随时按 **Ctrl+Shift+K**（或 **Ctrl+Shift+P**）打开快捷搜索。
 
+按 **↑/↓** 选择片段，按 **Enter** 打开占位符表单；在表单中按 **Tab / Shift+Tab** 切换字段，按 **Ctrl+Enter** 插入并发送，按 **Esc** 关闭。必填项未填写时，按 **Ctrl+Enter** 会聚焦到第一个待填写项。
+
 ## 安装
 
 ### 从 DSH 插件商店安装
