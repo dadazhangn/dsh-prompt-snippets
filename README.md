@@ -16,7 +16,9 @@ Prompt Snippets is a local-first prompt library for [DeepSeek Harness (DSH)](htt
 2. Search your library and click the snippet you need.
 3. Fill in its variables; the completed prompt goes straight into the composer.
 
-The panel supports browsing, editing, and organizing your snippets without leaving the conversation. For a quick lookup, press **Ctrl+Shift+K** (or **Ctrl+Shift+P**) and search from anywhere.
+The panel supports browsing, editing, and organizing your snippets without leaving the conversation. For a quick lookup, press **Ctrl+Shift+K** and search from anywhere.
+
+Use **↑/↓** to choose a snippet and **Enter** to open its placeholder form. In the form, **Tab / Shift+Tab** moves between fields, **Ctrl+Enter** inserts and sends, and **Esc** closes it. If a required field is empty, **Ctrl+Enter** focuses the first missing field instead.
 
 Use **↑/↓** to choose a snippet and **Enter** to open its placeholder form. In the form, **Tab / Shift+Tab** moves between fields, **Ctrl+Enter** inserts and sends, and **Esc** closes it. If a required field is empty, **Ctrl+Enter** focuses the first missing field instead.
 

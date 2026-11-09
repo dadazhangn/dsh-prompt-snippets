@@ -317,7 +317,10 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
     name: "带必填",
     category: "开发",
     content: "请审查 {{代码}}，关注 {{关注点}}。",
-    variables: { 代码: { required: true }, 关注点: { default: "正确性" } },
+    variables: {
+      代码: { required: true },
+      关注点: { default: "正确性", options: ["正确性", "性能"] },
+    },
     revision: 3,
     deletedAt: null,
   };
@@ -358,6 +361,9 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   t = rerender(registered.Component, props);
   let pTxt = flat(panelOf(t)).filter((x) => typeof x === "string");
   check("必填变量弹表单不直插", inserted.length === 0 && pTxt.some((x) => x.includes("填写「带必填」")));
+  const initialForm = allNodes(panelOf(t)).find((n) => n?.props?.id === "ps-fill-form");
+  const initialSelects = allNodes(initialForm).filter((n) => n?.props?.className === "ps-select");
+  check("有默认值的可选下拉框初始选中默认值", initialSelects[0]?.props?.value === "正确性", initialSelects[0]?.props?.value);
 
   // 插入按钮在必填未填时应禁用
   let insBtn = findBtnByText(t, "插入");
@@ -397,13 +403,13 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   allNodes(emptyFillForm).find((node) => node?.props?.onClick && node.children?.includes("取消"))?.props?.onClick();
   check("取消占位符表单后焦点回到搜索框", searchFocusCount === 1);
 
-  // 填必填项（「代码」因变量名含「代码」渲染为 textarea，「关注点」仍是单行 input）
+  // 填必填项（「代码」渲染为 textarea；「关注点」是已初始化默认值的下拉框）
   row.props.onClick();
   t = rerender(registered.Component, props);
   const inputs = allNodes(panelOf(t)).filter(
     (n) => n?.props?.className === "ps-input" || n?.props?.className === "ps-textarea"
   );
-  check("表单为每个变量渲染一个输入框", inputs.length === 2, String(inputs.length));
+  check("表单只为必填文本变量渲染输入框", inputs.length === 1, String(inputs.length));
   const reopenedInputs = inputs.map(() => ({ focus() {} }));
   inputs.forEach((node, index) => {
     if (typeof node.props.ref === "function") node.props.ref(reopenedInputs[index]);
@@ -438,6 +444,43 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   t = rerender(registered.Component, props);
   findBtnByText(t, "保留占位符插入").props.onClick();
   check("保留占位符插入原文", inserted[0] === "请审查 {{代码}}，关注 {{关注点}}。", inserted[0]);
+
+  // 枚举表单默认值：验证下拉框的可见值与校验状态一致。
+  const originalFormRpc = fakeRpc.call;
+  const ENUM_SAMPLE = {
+    id: "enum",
+    name: "枚举默认值",
+    category: "开发",
+    content: "关注 {{可选}}，选择 {{必填}}。",
+    variables: {
+      可选: { default: "正确性", options: ["正确性", "性能"] },
+      必填: { required: true, options: ["完整性", "安全性"] },
+    },
+    revision: 1,
+    deletedAt: null,
+  };
+  fakeRpc.call = (channel, endpoint, payload) => {
+    if (endpoint === "list") return Promise.resolve({ ok: true, value: { version: 3, snippets: [ENUM_SAMPLE] } });
+    return originalFormRpc(channel, endpoint, payload);
+  };
+  t = await openPanel();
+  await new Promise((r) => setImmediate(r));
+  t = rerender(registered.Component, props);
+  findBtnByText(t, "枚举默认值").props.onClick();
+  t = rerender(registered.Component, props);
+  const enumForm = allNodes(panelOf(t)).find((n) => n?.props?.id === "ps-fill-form");
+  const enumSelects = allNodes(enumForm).filter((n) => n?.props?.className === "ps-select");
+  check("可选枚举尊重有效默认值", enumSelects[0]?.props?.value === "正确性", enumSelects[0]?.props?.value);
+  check("必填枚举默认选择首项", enumSelects[1]?.props?.value === "完整性", enumSelects[1]?.props?.value);
+  check("必填枚举首项已选时插入按钮可用", findBtnByText(t, "插入")?.props?.disabled === false);
+  fakeRpc.call = originalFormRpc;
+  findBtnByText(t, "取消")?.props?.onClick();
+  const panelButton = t.children.find((node) => node?.props?.id === "ps-button");
+  panelButton.props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+  t = rerender(registered.Component, props);
+  t = openPanel();
+  await new Promise((r) => setImmediate(r));
+  t = rerender(registered.Component, props);
 
   // ══════════ §2.4 行内编辑 ══════════
   inserted.length = 0;

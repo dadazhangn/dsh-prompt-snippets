@@ -18,7 +18,6 @@ export default [
         process: "readonly",
         Buffer: "readonly",
         __dirname: "readonly",
-        __dirname: "readonly",
         // Browser/DSH globals (client.js)
         window: "readonly",
         document: "readonly",
