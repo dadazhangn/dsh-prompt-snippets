@@ -20,6 +20,8 @@ The panel supports browsing, editing, and organizing your snippets without leavi
 
 Use **↑/↓** to choose a snippet and **Enter** to open its placeholder form. In the form, **Tab / Shift+Tab** moves between fields, **Ctrl+Enter** inserts and sends, and **Esc** closes it. If a required field is empty, **Ctrl+Enter** focuses the first missing field instead.
 
+Use **↑/↓** to choose a snippet and **Enter** to open its placeholder form. In the form, **Tab / Shift+Tab** moves between fields, **Ctrl+Enter** inserts and sends, and **Esc** closes it. If a required field is empty, **Ctrl+Enter** focuses the first missing field instead.
+
 ## Install
 
 ### From the DSH plugin store
