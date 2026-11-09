@@ -16,6 +16,8 @@ window.__ModuleLoader__.load({
       "error.insertFailed": "插入失败：请先把光标放进输入框再试。",
       "error.insertFailedDraft": "插入失败：请先把光标放进输入框再试（草稿可能在面板打开期间被改动）。",
       "error.optimizeFailed": "优化失败",
+      "error.optimizeHttp": "优化请求失败（HTTP {status}）",
+      "error.optimizeNoBody": "流式响应缺少响应体",
       "error.noModel": "当前未配置默认模型，无法优化",
       "error.exportFailed": "导出失败",
       "error.importFailed": "导入失败",
@@ -35,6 +37,13 @@ window.__ModuleLoader__.load({
       "notice.importedSkipped": "，跳过 {n}",
       "notice.importedUpdated": "，更新 {n}",
       "notice.historyInserted": "已插入旧版内容",
+      "notice.replaced": "已替换「{name}」正文",
+      "notice.exported": "已导出 {count} 条",
+      "notice.undoFailed": "{count} 条恢复失败（可能名称已被占用）。",
+      "undo.deletedOne": "已删除「{name}」",
+      "undo.deletedMany": "已删除 {count} 条",
+      "undo.restoreTitle": "恢复「{name}」",
+      "undo.restoreFailed": "恢复「{name}」失败",
       "edit.confirmDiscard": "草稿还没保存，再点一次「确认放弃」才会丢弃。",
       "edit.overwrite": "覆盖",
       "edit.reload": "重新载入",
@@ -60,6 +69,7 @@ window.__ModuleLoader__.load({
       "fill.cancel": "取消",
       "fill.keepRaw": "保留占位符插入",
       "fill.insert": "插入",
+      "fill.title": "填写「{name}」的占位符",
       "fill.keyboardHint": "Tab / Shift+Tab 切换变量 · Ctrl+Enter 插入并发送 · Esc 取消",
       "help.title": "快捷键与键盘操作",
       "help.open": "快捷键帮助",
@@ -78,6 +88,12 @@ window.__ModuleLoader__.load({
       "review.stopping": "正在取消…",
       "review.empty": "（空）",
       "review.overLongWarning": "⚠ 超出长度上限",
+      "review.title": "✨ 优化「{name}」",
+      "review.bytes": "字节 {before} → {after}",
+      "review.placeholdersLost": "占位符丢失：{names}",
+      "review.placeholdersKept": "占位符 {names} 已保留 ✓",
+      "review.replaceMissingPlaceholder": "优化结果丢失了占位符 {names}",
+      "review.retried": "已重试 {count} 次",
       "review.applyOverwrite": "用优化版覆盖",
       "review.discard": "放弃",
       "review.keepOriginal": "保留原文插入",
@@ -98,16 +114,20 @@ window.__ModuleLoader__.load({
       "item.editReadonly": "片段库处于只读状态，禁止编辑",
       "item.history": "查看历史版本",
       "item.optimize": "AI 优化（对比后决定）",
+      "item.optimizeAria": "AI 优化「{name}」",
       "item.noModel": "当前未配置默认模型",
       "item.delete": "删除（可撤销）",
       "item.deleteReadonly": "片段库处于只读状态，禁止删除",
       "palette.searchPlaceholder": "搜索片段（名称 / 分类 / 标签 / 内容）…",
       "palette.empty": "还没有片段，点 dock 的「＋ 新建」保存一个。",
       "palette.noMatch": "没有匹配「{query}」的片段。",
+      "panel.noMatch": "没有匹配「{query}」的片段。",
       "palette.noCategory": "（无分类）",
       "palette.hint": "↑↓ 选择 · Enter 插入 · Ctrl+Enter 提交 · Esc 关闭 · Ctrl+Shift+K 唤起",
       "history.loading": "加载中…",
       "history.empty": "暂无历史版本（每次保存前的内容会留档，最多 20 版）",
+      "history.title": "历史版本 ·「{name}」",
+      "history.savedAt": "保存于 {time} · ",
       "history.insertTitle": "把这一版的内容插入输入框",
       "history.insert": "插入旧版",
       "panel.empty": "还没有片段。点下面的「＋ 新建」或 /snippet add <名称> <内容> 保存一个。",
@@ -157,6 +177,8 @@ window.__ModuleLoader__.load({
       "error.insertFailed": "Insert failed: place the cursor in the composer first.",
       "error.insertFailedDraft": "Insert failed: place the cursor in the composer first (the draft may have changed while the panel was open).",
       "error.optimizeFailed": "Optimize failed",
+      "error.optimizeHttp": "Optimize request failed (HTTP {status})",
+      "error.optimizeNoBody": "The streaming response has no body",
       "error.noModel": "No default model configured — cannot optimize",
       "error.exportFailed": "Export failed",
       "error.importFailed": "Import failed",
@@ -176,6 +198,13 @@ window.__ModuleLoader__.load({
       "notice.importedSkipped": ", skipped {n}",
       "notice.importedUpdated": ", updated {n}",
       "notice.historyInserted": "Inserted old version content",
+      "notice.replaced": "Replaced the content of \"{name}\"",
+      "notice.exported": "Exported {count} snippets",
+      "notice.undoFailed": "Failed to restore {count} snippets (a name may already be in use).",
+      "undo.deletedOne": "Deleted \"{name}\"",
+      "undo.deletedMany": "Deleted {count} snippets",
+      "undo.restoreTitle": "Restore \"{name}\"",
+      "undo.restoreFailed": "Failed to restore \"{name}\"",
       "edit.confirmDiscard": "Draft not saved — click \"Discard\" again to discard it.",
       "edit.overwrite": "Overwrite",
       "edit.reload": "Reload",
@@ -201,6 +230,7 @@ window.__ModuleLoader__.load({
       "fill.cancel": "Cancel",
       "fill.keepRaw": "Insert with placeholders",
       "fill.insert": "Insert",
+      "fill.title": "Fill placeholders for \"{name}\"",
       "fill.keyboardHint": "Tab / Shift+Tab move between fields · Ctrl+Enter insert & send · Esc cancel",
       "help.title": "Keyboard shortcuts",
       "help.open": "Keyboard shortcuts",
@@ -219,6 +249,12 @@ window.__ModuleLoader__.load({
       "review.stopping": "Cancelling…",
       "review.empty": "(empty)",
       "review.overLongWarning": "⚠ Exceeds length limit",
+      "review.title": "✨ Optimize \"{name}\"",
+      "review.bytes": "Bytes {before} → {after}",
+      "review.placeholdersLost": "Missing placeholders: {names}",
+      "review.placeholdersKept": "Placeholders {names} preserved ✓",
+      "review.replaceMissingPlaceholder": "Optimized result is missing placeholders {names}",
+      "review.retried": "Retried {count} times",
       "review.applyOverwrite": "Overwrite with optimized",
       "review.discard": "Discard",
       "review.keepOriginal": "Insert original",
@@ -239,16 +275,20 @@ window.__ModuleLoader__.load({
       "item.editReadonly": "Snippet store is read-only — editing disabled",
       "item.history": "View version history",
       "item.optimize": "AI optimize (compare before deciding)",
+      "item.optimizeAria": "AI optimize \"{name}\"",
       "item.noModel": "No default model configured",
       "item.delete": "Delete (undoable)",
       "item.deleteReadonly": "Snippet store is read-only — deleting disabled",
       "palette.searchPlaceholder": "Search snippets (name / category / tag / content)…",
       "palette.empty": "No snippets yet — click \"＋ New\" on the dock to save one.",
       "palette.noMatch": "No snippets matching \"{query}\".",
+      "panel.noMatch": "No snippets matching \"{query}\".",
       "palette.noCategory": "(no category)",
       "palette.hint": "↑↓ Select · Enter Insert · Ctrl+Enter Submit · Esc Close · Ctrl+Shift+K Open",
       "history.loading": "Loading…",
       "history.empty": "No history yet (each save keeps the previous version, up to 20)",
+      "history.title": "Version history · \"{name}\"",
+      "history.savedAt": "Saved {time} · ",
       "history.insertTitle": "Insert this version's content into the composer",
       "history.insert": "Insert old version",
       "panel.empty": "No snippets yet. Click \"＋ New\" below or /snippet add <name> <content> to save one.",
@@ -1237,9 +1277,8 @@ window.__ModuleLoader__.load({
     const MAX_UNDO = 5;
 
     /** 把 throw 出来的任意值转成一句能看的错误文案。 */
-    // t 由 SnippetDock 闭包传入（参数），此处直接用全局兜底。
-    function msgOf(err) {
-      if (!err) return zh["error.unknown"];
+    function msgOf(err, t) {
+      if (!err) return t("error.unknown");
       if (typeof err === "string") return err;
       return String(err.message || err);
     }
@@ -1768,7 +1807,24 @@ window.__ModuleLoader__.load({
       const insert = (snippet, sendAfter = false) => {
         const plan = fillPlan(snippet);
         if (plan.kind === "form") {
-          setFilling({ snippet, values: {}, sendAfter });
+          const vars = snippet.variables || {};
+          const values = {};
+          for (const name of varNamesOf(snippet.content).filter((n) => !isDynamic(n))) {
+            const definition = vars[name] || {};
+            const options = Array.isArray(definition.options) ? definition.options : [];
+            if (
+              typeof definition.default === "string" &&
+              definition.default.trim() !== "" &&
+              (options.length === 0 || options.includes(definition.default))
+            ) {
+              values[name] = definition.default;
+            } else if (definition.required === true && options.length > 0) {
+              values[name] = options[0];
+            } else if (options.length > 0 && typeof definition.default === "string" && definition.default.trim() !== "") {
+              values[name] = options[0];
+            }
+          }
+          setFilling({ snippet, values, sendAfter });
           setError(null);
           // 从命令面板（palette）触发时主面板是关闭的，表单渲染在 open 面板内部，
           // 必须同时打开主面板并定位，否则「按回车后表单被吞」。
@@ -2053,13 +2109,59 @@ window.__ModuleLoader__.load({
           })
           .catch((e) => {
             setOptimizing(null);
-            setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: msgOf(e) } : prev));
+            setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: msgOf(e, t) } : prev));
           });
       };
 
       // A 方案：走 host 的 /api/prompt-snippets/optimize-stream，逐行 NDJSON 读取，
       // 每收到一段 text-delta 就累加进 review.optimized，textarea 实时显示生成进度。
       const streamOptimize = async (snippet, retries, signal) => {
+        const optimizeViaRpc = () => {
+          Promise.resolve(rpc.call(CHANNEL, "optimize", { content: snippet.content }, signal))
+            .then((result) => {
+              setOptimizing(null);
+              if (result && result.ok) {
+                const value = result.value || {};
+                setReview((prev) => prev ? {
+                  ...prev,
+                  optimized: String(value.optimized || ""),
+                  truncated: value.truncated === true,
+                  incomplete: false,
+                  retries,
+                  busy: false,
+                  stopping: false,
+                  error: null,
+                } : prev);
+                return;
+              }
+              const err = (result && result.error) || {};
+              if (err.code === "aborted") {
+                setReview(null);
+                return;
+              }
+              setReview((prev) => prev ? {
+                ...prev,
+                busy: false,
+                stopping: false,
+                incomplete: true,
+                error: err.message || t("error.optimizeFailed"),
+              } : prev);
+            })
+            .catch((error) => {
+              setOptimizing(null);
+              if (signal && signal.aborted) {
+                setReview(null);
+                return;
+              }
+              setReview((prev) => prev ? {
+                ...prev,
+                busy: false,
+                stopping: false,
+                incomplete: true,
+                error: msgOf(error, t),
+              } : prev);
+            });
+        };
         try {
           const response = await fetch("/api/prompt-snippets/optimize-stream", {
             method: "POST",
@@ -2068,7 +2170,14 @@ window.__ModuleLoader__.load({
             signal,
             credentials: "include",
           });
-          if (!response.body) throw new Error("流式响应没有 body");
+          if (response.status === 404 || response.status === 405) {
+            optimizeViaRpc();
+            return;
+          }
+          if (!response.ok) {
+            throw new Error(t("error.optimizeHttp", { status: response.status }));
+          }
+          if (!response.body) throw new Error(t("error.optimizeNoBody"));
           const reader = response.body.getReader();
           const decoder = typeof TextDecoder === "function" ? new TextDecoder() : null;
           let buffer = "";
@@ -2139,7 +2248,7 @@ window.__ModuleLoader__.load({
             return;
           }
           setOptimizing(null);
-          setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: msgOf(e) } : prev));
+          setReview((prev) => (prev ? { ...prev, busy: false, stopping: false, incomplete: true, error: msgOf(e, t) } : prev));
         }
       };
 
@@ -2245,7 +2354,7 @@ window.__ModuleLoader__.load({
             if (result && result.ok) {
               applyResult(result);
               setReview(null);
-              setNotice(`已替换「${s.name}」正文`);
+              setNotice(t("notice.replaced", { name: s.name }));
               return;
             }
             const err = (result && result.error) || {};
@@ -2256,7 +2365,7 @@ window.__ModuleLoader__.load({
             setReview((prev) => (prev ? { ...prev, saving: false, error: err.message || t("error.replaceFailed") } : prev));
           })
           .catch((e) => {
-            setReview((prev) => (prev ? { ...prev, saving: false, error: msgOf(e) } : prev));
+            setReview((prev) => (prev ? { ...prev, saving: false, error: msgOf(e, t) } : prev));
           });
       };
 
@@ -2277,7 +2386,7 @@ window.__ModuleLoader__.load({
             if (result && result.ok) {
               const path = (result.value && result.value.path) || "";
               setExportPath(path);
-              setNotice(`已导出 ${result.value.count} 条`);
+              setNotice(t("notice.exported", { count: result.value.count }));
               setError(null);
             } else {
               setError(result && result.error ? result.error.message : t("error.exportFailed"));
@@ -2355,7 +2464,7 @@ window.__ModuleLoader__.load({
               // 成功才从撤销条移除，失败保留入口让用户能重试（P1-5）
               setDeleted((prev) => prev.filter((x) => x.id !== target.id));
               applyResult(result);
-            } else setError(result && result.error ? result.error.message : t("error.restoreFailed"));
+            } else setError(result && result.error ? result.error.message : t("undo.restoreFailed", { name: target.name }));
           })
           .catch((err) => setError(String((err && err.message) || err)));
       };
@@ -2377,7 +2486,7 @@ window.__ModuleLoader__.load({
               // 成功的从撤销条移除，失败的原样保留（P1-5）
               setDeleted((prev) => prev.filter((x) => !good.includes(x.id)));
             }
-            if (bad > 0) setError(`${bad} 条恢复失败（可能名称已被占用）。`);
+            if (bad > 0) setError(t("notice.undoFailed", { count: bad }));
             load();
           })
           .catch((err) => setError(String((err && err.message) || err)));
@@ -2581,7 +2690,7 @@ window.__ModuleLoader__.load({
             id: "ps-fill-form",
             style: style.editor,
           },
-          h("div", { style: style.label }, `填写「${cur.snippet.name}」的占位符`),
+          h("div", { style: style.label }, t("fill.title", { name: cur.snippet.name })),
           names.map((nm) => {
             const d = vars[nm] || {};
             const required = d.required === true;
@@ -2679,7 +2788,7 @@ window.__ModuleLoader__.load({
         const optTitle = overLong
           ? t("review.overLong")
           : lost.length > 0
-            ? `优化结果丢失了占位符 ${lost.map((n) => `{{${n}}}`).join("、")}`
+            ? t("review.replaceMissingPlaceholder", { names: lost.map((n) => `{{${n}}}`).join(", ") })
             : t("review.replacePrompt");
         return h(
           "div",
@@ -2687,7 +2796,7 @@ window.__ModuleLoader__.load({
           h(
             "div",
             { style: style.reviewBox },
-            h("div", { style: style.label }, `✨ 优化「${cur.snippet.name}」`),
+            h("div", { style: style.label }, t("review.title", { name: cur.snippet.name })),
             h(
               "div",
               { style: style.reviewCols },
@@ -2719,17 +2828,17 @@ window.__ModuleLoader__.load({
             h(
               "div",
               { style: style.reviewMeta },
-              h("span", null, `字节 ${byteLen(cur.original)} → ${byteLen(cur.optimized)}`),
+              h("span", null, t("review.bytes", { before: byteLen(cur.original), after: byteLen(cur.optimized) })),
               before.length > 0
                 ? h(
                   "span",
                   { style: lost.length > 0 ? style.reviewLost : style.reviewKeep },
                   lost.length > 0
-                    ? `占位符丢失：${lost.map((n) => `{{${n}}}`).join("、")}`
-                    : `占位符 ${before.map((n) => `{{${n}}}`).join("、")} 已保留 ✓`,
+                    ? t("review.placeholdersLost", { names: lost.map((n) => `{{${n}}}`).join(", ") })
+                    : t("review.placeholdersKept", { names: before.map((n) => `{{${n}}}`).join(", ") }),
                 )
                 : null,
-              cur.retries > 0 ? h("span", null, `已重试 ${cur.retries} 次`) : null,
+              cur.retries > 0 ? h("span", null, t("review.retried", { count: cur.retries })) : null,
               overLong ? h("span", { style: style.reviewLost }, t("review.overLongWarning")) : null,
             ),
             cur.conflict
@@ -2894,7 +3003,7 @@ window.__ModuleLoader__.load({
                 // 无默认模型时直接置灰：不要留到点击才报错（ROADMAP §3.1）
                 disabled: optimizing !== null || !optAvail.available,
                 title: optAvail.available ? t("item.optimize") : optAvail.reason || t("item.noModel"),
-                "aria-label": `AI 优化「${s.name}」`,
+                "aria-label": t("item.optimizeAria", { name: s.name }),
               },
               optimizing === s.id ? "…" : "✨",
             ),
@@ -3036,7 +3145,7 @@ window.__ModuleLoader__.load({
           h(
             "div",
             { style: style.historyBox },
-            h("div", { style: style.label }, `历史版本 ·「${hh.name}」`),
+            h("div", { style: style.label }, t("history.title", { name: hh.name })),
             hh.busy
               ? h("div", { style: style.hintInline }, t("history.loading"))
               : hh.list.length === 0
@@ -3052,7 +3161,7 @@ window.__ModuleLoader__.load({
                       h(
                         "div",
                         { style: { color: C.textDim, fontSize: "10px" } },
-                        `保存于 ${fmtTime(v.at)} · `,
+                        t("history.savedAt", { time: fmtTime(v.at) }),
                         h(
                           "span",
                           {
@@ -3099,7 +3208,7 @@ window.__ModuleLoader__.load({
             ? h(
               "div",
               { style: style.empty },
-              `没有匹配「${query}」的片段。`,
+              t("panel.noMatch", { query }),
               h(
                 "button",
                 {
@@ -3455,7 +3564,9 @@ window.__ModuleLoader__.load({
                 h(
                   "span",
                   { style: style.undoText },
-                  deleted.length === 1 ? `已删除「${deleted[0].name}」` : `已删除 ${deleted.length} 条`,
+                  deleted.length === 1
+                    ? t("undo.deletedOne", { name: deleted[0].name })
+                    : t("undo.deletedMany", { count: deleted.length }),
                 ),
                 deleted.map((d) =>
                   h(
@@ -3466,7 +3577,7 @@ window.__ModuleLoader__.load({
                       className: "ps-undo",
                       style: style.undoChip,
                       onClick: () => undoOne(d),
-                      title: `恢复「${d.name}」`,
+                      title: t("undo.restoreTitle", { name: d.name }),
                     },
                     "↩ " + d.name,
                   ),

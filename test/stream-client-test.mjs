@@ -7,7 +7,7 @@ const end = source.indexOf("\n      const optimize =", begin);
 assert(begin >= 0 && end > begin);
 
 let review;
-const runStream = new Function("fetch", "setReview", "setOptimizing", "t", "msgOf", source.slice(begin, end) + "\nreturn streamOptimize;");
+const runStream = new Function("fetch", "setReview", "setOptimizing", "t", "msgOf", "rpc", "CHANNEL", source.slice(begin, end) + "\nreturn streamOptimize;");
 const setReview = (next) => { review = typeof next === "function" ? next(review) : next; };
 const encoder = new TextEncoder();
 function responseFrom(messages) {
@@ -21,10 +21,14 @@ function responseFrom(messages) {
     },
   }));
 }
+const translate = (key, values) => key === "error.optimizeHttp"
+  ? `HTTP ${values.status}`
+  : key;
+const noRpc = { call: async () => { throw new Error("unexpected RPC call"); } };
 const stream = runStream(async () => responseFrom([
   { type: "delta", text: "中文" },
   { type: "done", optimized: "中文", truncated: false },
-]), setReview, () => {}, (key) => key, (error) => error.message);
+]), setReview, () => {}, translate, (error) => error.message, noRpc, "test-channel");
 
 review = { busy: true, optimized: "" };
 await stream({ content: "输入" }, 0);
@@ -35,11 +39,48 @@ assert.equal(review.error, null);
 const limited = runStream(async () => responseFrom([
   { type: "delta", text: "半截" },
   { type: "error", code: "output-limit", message: "输出达到上限" },
-]), setReview, () => {}, (key) => key, (error) => error.message);
+]), setReview, () => {}, translate, (error) => error.message, noRpc, "test-channel");
 review = { busy: true, optimized: "" };
 await limited({ content: "输入" }, 0);
 assert.equal(review.incomplete, true);
 assert.equal(review.error, "输出达到上限");
+
+for (const status of [404, 405]) {
+  let rpcCall;
+  const fallback = runStream(
+    async () => new Response("route not found", { status }),
+    setReview,
+    () => {},
+    translate,
+    (error) => error.message,
+    { call: async (...args) => {
+      rpcCall = args;
+      return { ok: true, value: { optimized: "RPC 结果", truncated: false } };
+    } },
+    "test-channel",
+  );
+  review = { busy: true, optimized: "" };
+  await fallback({ content: "输入" }, 2);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(rpcCall, ["test-channel", "optimize", { content: "输入" }, undefined]);
+  assert.equal(review.optimized, "RPC 结果");
+  assert.equal(review.retries, 2);
+  assert.equal(review.busy, false);
+}
+
+const serverError = runStream(
+  async () => new Response("server error", { status: 500 }),
+  setReview,
+  () => {},
+  translate,
+  (error) => error.message,
+  noRpc,
+  "test-channel",
+);
+review = { busy: true, optimized: "" };
+await serverError({ content: "输入" }, 0);
+assert.equal(review.incomplete, true);
+assert.equal(review.error, "HTTP 500");
 
 let component;
 globalThis.document = { addEventListener() {}, removeEventListener() {} };
