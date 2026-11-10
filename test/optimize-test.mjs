@@ -124,6 +124,19 @@ const makeStreamRequest = () => new Request("http://localhost/api/prompt-snippet
   headers: { "content-type": "application/json" },
   body: JSON.stringify({ content: "原始提示词 {{占位}}" }),
 });
+let overLimitStreamCalls = 0;
+fakeLlm = { stream: async function* () { overLimitStreamCalls++; } };
+const oversizedContent = "x".repeat(200_001);
+r = await handler("optimize", { content: oversizedContent }, undefined);
+check("RPC 优化拒绝超长输入", r.ok === false && r.error.code === "bad-request", r.error?.message);
+const oversizedResponse = await streamRoute.fetch(new Request("http://localhost/api/prompt-snippets/optimize-stream", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ content: oversizedContent }),
+}));
+const oversizedMessages = (await oversizedResponse.text()).trim().split("\n").map(JSON.parse);
+check("流式优化拒绝超长输入", oversizedMessages.at(-1)?.code === "bad-request" && overLimitStreamCalls === 0, JSON.stringify(oversizedMessages));
+
 fakeLlm = { stream: makeStream([
   { type: "text-delta", text: "半截优化结果 {{占位}}" },
   { type: "finish", reason: { kind: "max-tokens" } },

@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile, rename, unlink, open, copyFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, unlink, open, copyFile, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export const name = "prompt-snippets";
@@ -173,7 +173,7 @@ const VAR_NAME_RE = /^[\p{L}\p{N}_-]{1,40}$/u;
  *   {{{x}}}     → "{" + 变量 + "}"
  * 不用全局正则替换：\\{{ 这类组合会被回溯吃掉。
  */
-function scanPlaceholders(content) {
+export function scanPlaceholders(content) {
   const tokens = [];
   const names = [];
   const seen = new Set();
@@ -374,7 +374,7 @@ function migrate(data) {
     const name = rawName.length > MAX_NAME ? rawName.slice(0, MAX_NAME) : rawName;
     if (name !== rawName) changed = true;
 
-    let id = typeof item.id === "string" && item.id ? item.id : null;
+    let id = typeof item.id === "string" && /^[\w-]{1,128}$/u.test(item.id) ? item.id : null;
     if (!id) {
       id = randomUUID();
       changed = true;
@@ -703,7 +703,16 @@ async function rotateBackups() {
 // 只记录「被替换掉的那一版」，当前版永远在主库；不随导出分发。
 
 function historyPath(id) {
-  return dataPath("history", `${id}.json`);
+  if (typeof id !== "string" || !/^[\w-]{1,128}$/u.test(id)) {
+    throw new TypeError("无效的历史记录 id");
+  }
+  const historyDir = resolve(dataPath("history"));
+  const target = resolve(historyDir, `${id}.json`);
+  const fromHistory = relative(historyDir, target);
+  if (fromHistory === ".." || fromHistory.startsWith(`..${sep}`) || isAbsolute(fromHistory)) {
+    throw new TypeError("历史记录路径超出目录范围");
+  }
+  return target;
 }
 
 /** 记录一次历史版本（prev = 被覆盖的那一版）。保留最近 HISTORY_KEEP 版，超体积丢最旧。 */
@@ -727,7 +736,20 @@ async function recordHistory(id, prev) {
       list.shift();
       payload = JSON.stringify(list);
     }
-    await writeFile(file, payload, "utf8");
+    const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    let fh;
+    try {
+      try {
+        fh = await open(tmp, "w");
+        await fh.writeFile(payload, "utf8");
+        await fh.sync();
+      } finally {
+        if (fh) await fh.close().catch(() => {});
+      }
+      await rename(tmp, file);
+    } finally {
+      await unlink(tmp).catch(() => {});
+    }
   } catch (_) {
     /* 历史写入失败只降级，不影响主流程 */
   }
@@ -908,6 +930,9 @@ function optimizeFinishFailure(reason) {
 }
 
 async function optimize(ctx, content, signal) {
+  if (typeof content !== "string" || content.length > MAX_CONTENT) {
+    return fail("bad-request", "优化内容过长");
+  }
   const avail = optimizeAvailability(ctx);
   if (!avail.available) return fail("unavailable", avail.reason);
   const llm = ctx.get("llm");
@@ -971,6 +996,12 @@ async function optimize(ctx, content, signal) {
  * 取消：request.signal 断开时 ReadableStream 的 cancel 会触发，llm.stream 的 signal 停流。
  */
 function optimizeStreamResponse(ctx, content, requestSignal) {
+  if (typeof content !== "string" || content.length > MAX_CONTENT) {
+    return new Response(JSON.stringify({ type: "error", code: "bad-request", message: "优化内容过长" }) + "\n", {
+      status: 200,
+      headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-store" },
+    });
+  }
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -1736,6 +1767,7 @@ async function dispatch(ctx, endpoint, payload, signal) {
     case "history": {
       const id = typeof payload?.id === "string" ? payload.id : "";
       if (!id) return fail("bad-request", "需要提供 id");
+      if (!/^[\w-]{1,128}$/u.test(id)) return fail("bad-request", "历史记录 id 不合法");
       const list = await listHistory(id);
       return { ok: true, value: { id, history: list } };
     }
@@ -1758,7 +1790,8 @@ async function dispatch(ctx, endpoint, payload, signal) {
       // revealPath（面板「打开」按钮）只想用系统文件管理器打开一个已存在的文件，
       // 不重新落盘、不重新生成内容——否则会覆盖掉用户手工改过的导出文件。
       if (typeof payload?.revealPath === "string" && payload.revealPath.trim() !== "") {
-        const p = payload.revealPath.trim();
+        const p = await resolveExportPath(payload.revealPath);
+        if (!p) return fail("bad-request", "只能打开 exports 目录中的文件");
         const { revealed, revealError } = await revealInFileManager(p);
         return { ok: true, value: { path: p, revealed, revealError: revealError || undefined } };
       }
@@ -1812,21 +1845,17 @@ async function dispatch(ctx, endpoint, payload, signal) {
       let raw = payload?.json;
       let usedPath = null;
       if (typeof payload?.path === "string" && payload.path.trim() !== "") {
-        const target = payload.path.trim();
+        const requestedPath = payload.path.trim();
+        const target = await resolveExportPath(requestedPath, true);
+        if (!target) return fail("bad-request", "只能从 exports 目录导入文件");
         usedPath = target;
         try {
           raw = await readFile(target, "utf8");
-        } catch (_) {
-          const guess = dataPath("exports", target.toLowerCase().endsWith(".json") ? target : `${target}.json`);
-          try {
-            raw = await readFile(guess, "utf8");
-            usedPath = guess;
-          } catch (error) {
-            return fail(
-              "bad-request",
-              `读不到导入文件「${target}」：${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
+        } catch (error) {
+          return fail(
+            "bad-request",
+            `读不到导入文件「${target}」：${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
       const result = await importSnippets({ ...payload, json: raw, rawBytes: raw !== undefined ? byteLength(raw) : 0 });
@@ -1847,7 +1876,6 @@ async function dispatch(ctx, endpoint, payload, signal) {
 const ADD_USAGE = "/snippet add <名称> <内容> [--cat=<分类>] [--tag=<标签>] [--pin]";
 const USAGE = `${ADD_USAGE} | list | show <名称> | rm <名称|#id> | undo <名称|#id> | mv <名称> <新名称> | pin <名称|#id> | unpin <名称|#id> | tag <名称|#id> <标签…> | optimize <名称> | export [文件名] | import <文件路径> [--replace] [--dry]`;
 
-/** 导出文件名不能带路径分隔符，也不能是 `.`/`..`，避免写出数据目录。 */
 /**
  * 用系统默认方式在文件管理器里定位一个已存在的文件。
  * win32 → explorer /select,；darwin → open -R；linux 等 → xdg-open 所在目录。
@@ -1870,18 +1898,48 @@ async function revealInFileManager(filePath) {
       cmd = "xdg-open";
       args = [dirname(filePath)];
     }
-    await new Promise((resolve) => {
+    revealed = await new Promise((resolve) => {
       const child = spawn(cmd, args, { stdio: "ignore", detached: true });
-      child.on("error", () => resolve(false));
-      child.on("spawn", () => resolve(true));
-      // 文件管理器可能立即退出也可能挂起；500ms 兜底，不阻塞导出结果
-      setTimeout(() => resolve(true), 500);
+      const timer = setTimeout(() => resolve(false), 500);
+      const finish = (started) => {
+        clearTimeout(timer);
+        resolve(started);
+      };
+      child.on("error", () => finish(false));
+      child.on("spawn", () => finish(true));
     });
-    revealed = true;
+    if (!revealed) revealError = "无法启动文件管理器";
   } catch (error) {
     revealError = error instanceof Error ? error.message : String(error);
   }
   return { revealed, revealError };
+}
+
+async function resolveExportPath(input, allowExtensionFallback = false) {
+  const text = typeof input === "string" ? input.trim() : "";
+  if (!text) return null;
+  const exportsDir = resolve(dataPath("exports"));
+  const relativeInput = text.replace(/^exports[\\/]/iu, "");
+  const candidate = isAbsolute(text) ? resolve(text) : resolve(exportsDir, relativeInput);
+  const candidates = allowExtensionFallback && !candidate.toLowerCase().endsWith(".json")
+    ? [candidate, `${candidate}.json`]
+    : [candidate];
+  try {
+    const realExportsDir = await realpath(exportsDir);
+    for (const path of candidates) {
+      let realCandidate;
+      try {
+        realCandidate = await realpath(path);
+      } catch (_) {
+        continue;
+      }
+      const rel = relative(realExportsDir, realCandidate);
+      if (rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return realCandidate;
+    }
+  } catch (_) {
+    return null;
+  }
+  return null;
 }
 
 function safeExportName(raw) {
@@ -1889,8 +1947,10 @@ function safeExportName(raw) {
   const base = text === "" ? "snippets" : text;
   if (base.includes("/") || base.includes("\\") || base === "." || base === "..") return null;
   const withExt = base.toLowerCase().endsWith(".json") ? base : `${base}.json`;
-  // 只留安全字符，避免 Windows 保留名/控制字符
+  // 只留安全字符，避免非法路径字符与控制字符。
   if (!/^[^<>:"|?*\u0000-\u001f]{1,80}$/u.test(withExt)) return null;
+  const deviceName = withExt.split(".", 1)[0].replace(/[ .]+$/u, "").toUpperCase();
+  if (/^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])$/u.test(deviceName)) return null;
   return withExt;
 }
 
@@ -2199,13 +2259,28 @@ export function apply(ctx) {
           const dryRun = rest.includes("--dry");
           const target = tokens.join(" ").trim();
           if (!target) return { kind: "error", text: "用法：/snippet import <文件路径> [--replace] [--dry]" };
+          let json;
+          let sourcePath = target;
+          try {
+            try {
+              json = await readFile(target, "utf8");
+            } catch (directError) {
+              const candidate = await resolveExportPath(target, true);
+              if (!candidate) throw directError;
+              sourcePath = candidate;
+              json = await readFile(candidate, "utf8");
+            }
+          } catch (error) {
+            return { kind: "error", text: `读不到导入文件「${target}」：${error instanceof Error ? error.message : String(error)}` };
+          }
           const result = await dispatch(
             ctx,
             "import",
-            { path: target, mode: replace ? "replace" : "merge", dryRun },
+            { json, rawBytes: byteLength(json), mode: replace ? "replace" : "merge", dryRun },
             signal,
           );
           if (!result.ok) return { kind: "error", text: result.error.message };
+          result.value.path = sourcePath;
           const p = result.value.plan;
           const lines = [
             `${dryRun ? "预演（未写入）" : "导入完成"}（${replace ? "替换模式" : "合并模式"}）：`,

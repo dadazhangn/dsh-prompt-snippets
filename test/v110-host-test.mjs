@@ -155,6 +155,31 @@ await reset({
   check("修复后给出 warning", typeof r.value.warning === "string" && r.value.warning.includes("重复 id"), r.value.warning);
 }
 
+// 2.4b 不安全 id 在迁移时重建，安全的旧格式 id 保留
+await reset({
+  version: 4,
+  snippets: [
+    { id: "keep-me", name: "旧格式安全 id", content: "旧内容" },
+    { id: "../../pwned", name: "路径穿越 id", content: "原内容" },
+  ],
+});
+{
+  const r = await call("list", {});
+  const safe = r.value.snippets.find((s) => s.name === "旧格式安全 id");
+  const repaired = r.value.snippets.find((s) => s.name === "路径穿越 id");
+  check("安全旧格式 id 保持兼容", safe?.id === "keep-me", safe?.id);
+  check("路径穿越 id 迁移为安全 id", repaired?.id !== "../../pwned" && /^[\w-]{1,128}$/u.test(repaired?.id || ""), repaired?.id);
+  let escapedHistoryExists = true;
+  try {
+    await stat(join(TEST_HOME, "data", "pwned.json"));
+  } catch (error) {
+    escapedHistoryExists = error?.code !== "ENOENT";
+  }
+  check("迁移路径穿越 id 没有在 history 外生成文件", !escapedHistoryExists);
+  const unsafeHistory = await call("history", { id: "../../pwned" });
+  check("history 拒绝路径穿越 id", unsafeHistory.ok === false && unsafeHistory.error.code === "bad-request", JSON.stringify(unsafeHistory));
+}
+
 // 2.5 deletedAt 是字符串 "0"
 await reset({
   version: 2,
@@ -672,6 +697,8 @@ await reset({ version: 4, snippets: [] });
   check("历史按版本保留（≥2 版）", hist.value.history.length >= 2, String(hist.value.history.length));
   check("历史含被覆盖的内容", hist.value.history.some((v) => v.content === "内容2"), JSON.stringify(hist.value.history.map((v) => v.content)));
   check("历史记录带 revision", hist.value.history.every((v) => typeof v.revision === "number"));
+  const historyFiles = await readdir(join(TEST_HOME, "data", "prompt-snippets", "history"));
+  check("原子历史写入没有遗留临时文件", historyFiles.includes(`${cur.id}.json`) && historyFiles.every((file) => !file.endsWith(".tmp")), historyFiles.join(","));
 
   // history 端点缺 id 报错
   const noId = await call("history", {});

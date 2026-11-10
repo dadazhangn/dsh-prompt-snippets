@@ -2414,7 +2414,7 @@ window.__ModuleLoader__.load({
         setImporting(true);
         setError(null);
         setExportPath(null);
-        Promise.resolve(rpc.call(CHANNEL, "import", { path: target, mode: importReplace ? "replace" : "merge" }))
+        Promise.resolve(rpc.call(CHANNEL, "import", { path: target, source: "panel", mode: importReplace ? "replace" : "merge" }))
           .then((result) => {
             setImporting(false);
             if (result && result.ok) {

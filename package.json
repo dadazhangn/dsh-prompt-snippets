@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-snippets",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "description": "Save reusable prompt snippets with categories, {{placeholder}} fill forms & dropdown enums, version history, pinned/tag search, streaming AI rewrite, and crash-safe atomic JSON storage — insert them from the composer toolbar via a floating panel.",
   "keywords": [
@@ -49,13 +49,14 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
+    "README.zh-CN.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
-    "lint": "eslint index.js client.js",
-    "lint:fix": "eslint index.js client.js --fix",
-    "test": "node test/v110-host-test.mjs && node test/optimize-test.mjs && node test/io-test.mjs && node test/client-test.mjs && node test/client-error-test.mjs && node test/stream-client-test.mjs"
+    "lint": "eslint index.js client.js test/**/*.mjs",
+    "lint:fix": "eslint index.js client.js test/**/*.mjs --fix",
+    "test": "node test/v110-host-test.mjs && node test/optimize-test.mjs && node test/io-test.mjs && node test/placeholder-parity-test.mjs && node test/client-test.mjs && node test/client-error-test.mjs && node test/stream-client-test.mjs"
   },
   "dsh": {
     "bundle": {
