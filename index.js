@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, rename, unlink, open, copyFile, readdir, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, dirname, resolve, relative, isAbsolute, sep } from "node:path";
+import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 
 export const name = "prompt-snippets";
@@ -1846,7 +1846,7 @@ async function dispatch(ctx, endpoint, payload, signal) {
       let usedPath = null;
       if (typeof payload?.path === "string" && payload.path.trim() !== "") {
         const requestedPath = payload.path.trim();
-        const target = await resolveExportPath(requestedPath, true);
+        const target = await resolveExportPath(requestedPath, true, true);
         if (!target) return fail("bad-request", "只能从 exports 目录导入文件");
         usedPath = target;
         try {
@@ -1915,7 +1915,7 @@ async function revealInFileManager(filePath) {
   return { revealed, revealError };
 }
 
-async function resolveExportPath(input, allowExtensionFallback = false) {
+async function resolveExportPath(input, allowExtensionFallback = false, allowMissing = false) {
   const text = typeof input === "string" ? input.trim() : "";
   if (!text) return null;
   const exportsDir = resolve(dataPath("exports"));
@@ -1924,18 +1924,46 @@ async function resolveExportPath(input, allowExtensionFallback = false) {
   const candidates = allowExtensionFallback && !candidate.toLowerCase().endsWith(".json")
     ? [candidate, `${candidate}.json`]
     : [candidate];
+  const realpathWithMissing = async (path) => {
+    let current = resolve(path);
+    const suffix = [];
+    for (;;) {
+      try {
+        return resolve(await realpath(current), ...suffix.reverse());
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+        const parent = dirname(current);
+        if (parent === current) throw error;
+        suffix.push(basename(current));
+        current = parent;
+      }
+    }
+  };
   try {
-    const realExportsDir = await realpath(exportsDir);
+    const realExportsDir = allowMissing ? await realpathWithMissing(exportsDir) : await realpath(exportsDir);
+    let missingCandidate = null;
     for (const path of candidates) {
+      const lexicalRel = relative(exportsDir, path);
+      if (!lexicalRel || lexicalRel === ".." || lexicalRel.startsWith(`..${sep}`) || isAbsolute(lexicalRel)) continue;
       let realCandidate;
       try {
         realCandidate = await realpath(path);
-      } catch (_) {
+      } catch (error) {
+        if (!allowMissing || error?.code !== "ENOENT") continue;
+        try {
+          realCandidate = await realpathWithMissing(path);
+        } catch (_) {
+          continue;
+        }
+        const missingRel = relative(realExportsDir, realCandidate);
+        if (!missingRel || missingRel === ".." || missingRel.startsWith(`..${sep}`) || isAbsolute(missingRel)) continue;
+        if (!missingCandidate) missingCandidate = realCandidate;
         continue;
       }
       const rel = relative(realExportsDir, realCandidate);
       if (rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return realCandidate;
     }
+    if (missingCandidate) return missingCandidate;
   } catch (_) {
     return null;
   }

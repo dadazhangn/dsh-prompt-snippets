@@ -60,7 +60,6 @@ export default [
       "no-regex-spaces": "error",
       "no-sparse-arrays": "error",
       "no-unexpected-multiline": "error",
-      "no-unreachable": "error",
       "no-unsafe-finally": "error",
       "no-unsafe-negation": "error",
       "use-isnan": "error",

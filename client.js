@@ -1241,8 +1241,9 @@ window.__ModuleLoader__.load({
           continue;
         }
         const def = (variables && variables[tk.name]) || {};
-        const raw = values && typeof values[tk.name] === "string" ? values[tk.name] : "";
-        const effective = raw.trim() !== "" ? raw : typeof def.default === "string" ? def.default : "";
+        const hasExplicit = values && Object.prototype.hasOwnProperty.call(values, tk.name);
+        const raw = hasExplicit && typeof values[tk.name] === "string" ? values[tk.name] : "";
+        const effective = hasExplicit ? raw : typeof def.default === "string" ? def.default : "";
         if (effective === "" && def.required === true && !missing.includes(tk.name)) missing.push(tk.name);
         text += effective;
       }

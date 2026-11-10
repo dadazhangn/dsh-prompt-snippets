@@ -320,6 +320,8 @@ setGroup("12. 面板路径边界");
   check("面板允许导入 exports 内文件", panelInside.ok === true, panelInside.error?.message);
   const shortPanelInside = await call("import", { path: "exports/roundtrip-2", source: "panel", dryRun: true, mode: "merge" });
   check("面板路径保留 exports/ 与省略后缀的兼容", shortPanelInside.ok === true, shortPanelInside.error?.message);
+  const missingPanelFile = await call("import", { path: "exports/not-created-yet.json", source: "panel", mode: "merge" });
+  check("exports 内缺失导入文件返回文件读取错误", missingPanelFile.ok === false && missingPanelFile.error.message.includes("读不到导入文件") && !missingPanelFile.error.message.includes("只能从 exports"), missingPanelFile.error?.message);
   const cliImport = await cmd(`import ${outside}`);
   check("CLI 仍可导入用户指定绝对路径", cliImport.kind === "success" && cliImport.text.includes("新增 1"), cliImport.text);
 
