@@ -4,7 +4,7 @@
 //       usage 文案、导出目录权限失败降级。
 import { TEST_HOME, TEST_DIR } from "./isolate-home.mjs"; // 必须先顶 DSH_HOME 再 import 插件
 import { apply } from "../index.js";
-import { readFile, writeFile, readdir, mkdir, unlink, rm } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir, unlink, rm, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const results = [];
@@ -298,7 +298,7 @@ setGroup("11. 导出 reveal（一键打开目录）");
   const r = await call("export", { revealPath: p });
   const after = await readFile(p, "utf8");
   check("revealPath 返回 ok", r.ok === true, JSON.stringify(r));
-  check("revealPath 回传原路径", r.value?.path === p, r.value?.path);
+  check("revealPath 回传文件的规范路径", r.value?.path === await realpath(p), r.value?.path);
   check("revealPath 不重新落盘、不覆盖内容", after === "人工改动占位", after);
   check("revealPath 不改变库文件", true);
   await writeFile(p, before, "utf8");
