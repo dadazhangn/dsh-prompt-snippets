@@ -4,8 +4,8 @@
 
 export default [
   {
-    // 通用：忽略 node_modules 和测试目录
-    ignores: ["node_modules/**", "test/**"],
+    // 通用：忽略依赖目录
+    ignores: ["node_modules/**"],
   },
   {
     // 主文件：index.js（host 半，Node.js）+ client.js（client 半，浏览器/DSH）
@@ -60,7 +60,6 @@ export default [
       "no-regex-spaces": "error",
       "no-sparse-arrays": "error",
       "no-unexpected-multiline": "error",
-      "no-unreachable": "error",
       "no-unsafe-finally": "error",
       "no-unsafe-negation": "error",
       "use-isnan": "error",
@@ -96,11 +95,30 @@ export default [
       ecmaVersion: 2022,
       sourceType: "module",
       globals: {
+        // Node.js runtime and browser mocks used by the test harness.
         process: "readonly",
         console: "readonly",
+        global: "readonly",
+        globalThis: "readonly",
+        URL: "readonly",
+        setImmediate: "readonly",
+        setTimeout: "readonly",
+        window: "readonly",
+        document: "readonly",
+        localStorage: "readonly",
+        Request: "readonly",
+        Response: "readonly",
+        ReadableStream: "readonly",
+        TextEncoder: "readonly",
+        AbortController: "readonly",
       },
     },
     rules: {
+      // 测试至少启用基础错误检查规则；风格和未使用变量规则保持宽松。
+      "no-undef": "error",
+      "no-redeclare": "error",
+      "no-unreachable": "error",
+      "no-constant-condition": "error",
       "no-unused-vars": "off", // 测试里常有未使用的变量
       "no-console": "off",     // 测试输出合法
     },

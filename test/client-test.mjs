@@ -451,9 +451,10 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
     id: "enum",
     name: "枚举默认值",
     category: "开发",
-    content: "关注 {{可选}}，选择 {{必填}}。",
+    content: "关注 {{可选}}，填写 {{补充}}，选择 {{必填}}。",
     variables: {
       可选: { default: "正确性", options: ["正确性", "性能"] },
+      补充: { default: "默认补充" },
       必填: { required: true, options: ["完整性", "安全性"] },
     },
     revision: 1,
@@ -473,6 +474,13 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   check("可选枚举尊重有效默认值", enumSelects[0]?.props?.value === "正确性", enumSelects[0]?.props?.value);
   check("必填枚举默认选择首项", enumSelects[1]?.props?.value === "完整性", enumSelects[1]?.props?.value);
   check("必填枚举首项已选时插入按钮可用", findBtnByText(t, "插入")?.props?.disabled === false);
+  const enumInputs = allNodes(enumForm).filter((node) => node?.props?.className === "ps-input" || node?.props?.className === "ps-textarea");
+  check("可选文本默认值在表单中预填", enumInputs[0]?.props?.value === "默认补充", enumInputs[0]?.props?.value);
+  enumSelects[0].props.onChange({ target: { value: "" } });
+  enumInputs[0].props.onChange({ target: { value: "" } });
+  t = rerender(registered.Component, props);
+  findBtnByText(t, "插入")?.props?.onClick();
+  check("表单中主动清空的可选默认值保持为空", inserted.at(-1) === "关注 ，填写 ，选择 完整性。", inserted.at(-1));
   fakeRpc.call = originalFormRpc;
   findBtnByText(t, "取消")?.props?.onClick();
   const panelButton = t.children.find((node) => node?.props?.id === "ps-button");

@@ -31,7 +31,7 @@ jobs:
 
       - name: ESLint
         shell: bash
-        run: npx eslint index.js client.js
+        run: npm run lint
 
       - name: 语法检查（host 半 + client 半）
         shell: bash
@@ -40,12 +40,4 @@ jobs:
           node --check client.js
 
       - name: 测试套件
-        shell: bash
-        run: |
-          set -e
-          node test/v110-host-test.mjs
-          node test/optimize-test.mjs
-          node test/io-test.mjs
-          node test/client-test.mjs
-          node test/client-error-test.mjs
-          node test/stream-client-test.mjs
+        run: npm test

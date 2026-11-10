@@ -4,8 +4,8 @@
 //       usage 文案、导出目录权限失败降级。
 import { TEST_HOME, TEST_DIR } from "./isolate-home.mjs"; // 必须先顶 DSH_HOME 再 import 插件
 import { apply } from "../index.js";
-import { readFile, writeFile, readdir, mkdir, unlink, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, writeFile, readdir, mkdir, unlink, rm, realpath } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 const results = [];
 let group = "";
@@ -298,9 +298,53 @@ setGroup("11. 导出 reveal（一键打开目录）");
   const r = await call("export", { revealPath: p });
   const after = await readFile(p, "utf8");
   check("revealPath 返回 ok", r.ok === true, JSON.stringify(r));
-  check("revealPath 回传原路径", r.value?.path === p, r.value?.path);
+  check("revealPath 回传文件的规范路径", r.value?.path === await realpath(p), r.value?.path);
   check("revealPath 不重新落盘、不覆盖内容", after === "人工改动占位", after);
   check("revealPath 不改变库文件", true);
+  await writeFile(p, before, "utf8");
+}
+
+// 面板来源只能访问 exports/；命令行 import 保持绝对路径能力。
+setGroup("12. 面板路径边界");
+{
+  const outside = join(TEST_HOME, "outside-import.json");
+  await writeFile(outside, JSON.stringify({ snippets: [{ name: "外部文件", content: "可由 CLI 导入" }] }), "utf8");
+  const panelImport = await call("import", { path: outside, source: "panel", mode: "merge" });
+  check("面板拒绝 exports 外部导入路径", panelImport.ok === false && panelImport.error.code === "bad-request", JSON.stringify(panelImport));
+  const panelReveal = await call("export", { revealPath: outside });
+  check("拒绝打开 exports 外部路径", panelReveal.ok === false && panelReveal.error.code === "bad-request", JSON.stringify(panelReveal));
+  const untrustedRpcPath = await call("import", { path: outside, mode: "merge" });
+  check("RPC 直接传路径也不能读取 exports 外部文件", untrustedRpcPath.ok === false && untrustedRpcPath.error.code === "bad-request", JSON.stringify(untrustedRpcPath));
+  const insidePath = resolve(EXPORTS, "roundtrip-2.json");
+  const panelInside = await call("import", { path: insidePath, source: "panel", dryRun: true, mode: "merge" });
+  check("面板允许导入 exports 内文件", panelInside.ok === true, panelInside.error?.message);
+  const shortPanelInside = await call("import", { path: "exports/roundtrip-2", source: "panel", dryRun: true, mode: "merge" });
+  check("面板路径保留 exports/ 与省略后缀的兼容", shortPanelInside.ok === true, shortPanelInside.error?.message);
+  const missingPanelFile = await call("import", { path: "exports/not-created-yet.json", source: "panel", mode: "merge" });
+  check("exports 内缺失导入文件返回文件读取错误", missingPanelFile.ok === false && missingPanelFile.error.message.includes("读不到导入文件") && !missingPanelFile.error.message.includes("只能从 exports"), missingPanelFile.error?.message);
+  const cliImport = await cmd(`import ${outside}`);
+  check("CLI 仍可导入用户指定绝对路径", cliImport.kind === "success" && cliImport.text.includes("新增 1"), cliImport.text);
+
+  await reset({ version: 4, snippets: [] });
+  await writeFile(join(TEST_HOME, "snippets.json"), JSON.stringify({ snippets: [{ name: "指定路径文件", content: "应导入此文件" }] }), "utf8");
+  await writeFile(join(EXPORTS, "snippets.json"), JSON.stringify({ snippets: [{ name: "exports 同名文件", content: "不能覆盖用户选择" }] }), "utf8");
+  const originalCwd = process.cwd();
+  let sameNameImport;
+  try {
+    process.chdir(TEST_HOME);
+    sameNameImport = await cmd("import snippets.json");
+  } finally {
+    process.chdir(originalCwd);
+  }
+  const sameNameStore = await readStore();
+  check("CLI 同名文件优先导入指定路径", sameNameImport.kind === "success" && sameNameStore.snippets.some((snippet) => snippet.name === "指定路径文件") && !sameNameStore.snippets.some((snippet) => snippet.name === "exports 同名文件"), sameNameImport.text);
+
+}
+
+setGroup("13. 导出文件名安全");
+{
+  const forbidden = await cmd("export CON");
+  check("拒绝 Windows 保留设备名", forbidden.kind === "error" && forbidden.text.includes("不合法"), forbidden.text);
 }
 
 // ══════════════ 输出 ══════════════
