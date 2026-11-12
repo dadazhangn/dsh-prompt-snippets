@@ -1,7 +1,7 @@
-import { mkdir, readFile, writeFile, rename, unlink, open, copyFile, readdir, realpath } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, unlink, open, copyFile, readdir, realpath, lstat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 
 export const name = "prompt-snippets";
 export const inject = ["connection", "commands", "webServer"];
@@ -121,6 +121,8 @@ const ENDPOINTS = [
   "touch",
   "export",
   "import",
+  "backups",
+  "restore-backup",
   "history",
 ];
 
@@ -1342,6 +1344,7 @@ const TOUCH_BATCH = 20;
 let pendingTouch = new Map();
 let pendingCount = 0;
 let touchTimer = null;
+let touchGeneration = 0;
 
 function scheduleFlush() {
   if (touchTimer) return;
@@ -1355,10 +1358,14 @@ function scheduleFlush() {
 async function flushTouch() {
   if (pendingTouch.size === 0) return;
   const batch = pendingTouch;
+  const generation = touchGeneration;
   pendingTouch = new Map();
   pendingCount = 0;
   try {
     await transact((store) => {
+      if (generation !== touchGeneration) {
+        return { ok: true, changed: false, value: { version: store.version, snippets: [] } };
+      }
       let changed = false;
       for (const [id, delta] of batch) {
         const target = store.snippets.find((s) => s.id === id);
@@ -1410,8 +1417,8 @@ const EXPORT_FORMAT = "dsh-prompt-snippets";
 
 function buildExport(store, ids) {
   const pool = alive(store);
-  const picked =
-    Array.isArray(ids) && ids.length > 0 ? pool.filter((s) => ids.includes(s.id)) : pool;
+  const idSet = ids === undefined ? null : new Set(ids);
+  const picked = idSet === null ? pool : pool.filter((s) => idSet.has(s.id));
   return {
     format: EXPORT_FORMAT,
     version: STORE_VERSION,
@@ -1479,7 +1486,7 @@ function parseImport(raw) {
   return { snippets: out, dropped };
 }
 
-async function importSnippets(payload) {
+async function importSnippets(payload, sourceHash = null) {
   const rawBytes = typeof payload?.rawBytes === "number" && payload.rawBytes >= 0
     ? payload.rawBytes
     : payload?.json != null
@@ -1494,6 +1501,10 @@ async function importSnippets(payload) {
   const dryRun = payload?.dryRun === true;
 
   return transact((store) => {
+    const storeHash = createHash("sha256").update(JSON.stringify(store), "utf8").digest("hex");
+    if (typeof payload?.expectedStoreHash === "string" && payload.expectedStoreHash !== storeHash) {
+      return fail("conflict", "片段库在预演后发生变化，请重新预演后再确认");
+    }
     const plan = { added: 0, updated: 0, skipped: 0, deleted: 0, conflicts: [], dropped: parsed.dropped || 0 };
     const now = Date.now();
     // merge：只在活跃片段里按名称匹配，命中即跳过（不覆盖）。
@@ -1572,13 +1583,136 @@ async function importSnippets(payload) {
     }
 
     if (dryRun) {
-      return { ok: true, changed: false, value: { plan, dryRun: true, ...view(store).value } };
+      return { ok: true, changed: false, value: { plan, dryRun: true, sourceHash: sourceHash || undefined, storeHash, ...view(store).value } };
     }
     if (plan.added === 0 && plan.updated === 0 && plan.skipped === 0 && plan.deleted === 0) {
       return { ok: true, changed: false, value: { plan, ...view(store).value } };
     }
     return { ok: true, changed: true, history, value: { plan, ...view(store).value } };
   });
+}
+
+const BACKUP_NAME_RE = /^(?:snippets\.json\.(?:bak(?:\.[1-7])?|pre-v4\.bak)|snippets\.corrupt-[\w.-]+\.json)$/u;
+
+async function listBackups() {
+  try {
+    const names = await readdir(dataPath());
+    const files = await Promise.all(names.filter((name) => BACKUP_NAME_RE.test(name)).map(async (name) => {
+      try {
+        const info = await lstat(dataPath(name));
+        if (!info.isFile() || info.isSymbolicLink()) return null;
+        if (info.size > MAX_IMPORT_BYTES) return null;
+        const raw = await readFile(dataPath(name));
+        const parsed = JSON.parse(raw.toString("utf8"));
+        if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.snippets)) return null;
+        if (Number.isFinite(parsed.version) && parsed.version > STORE_VERSION) return null;
+        const sourceHash = createHash("sha256").update(raw).digest("hex");
+        return { name, size: raw.length, modifiedAt: info.mtimeMs, sourceHash };
+      } catch (_) {
+        return null;
+      }
+    }));
+    const valid = files.filter(Boolean);
+    valid.sort((a, b) => b.modifiedAt - a.modifiedAt);
+    return { ok: true, value: { backups: valid } };
+  } catch (error) {
+    if (error?.code === "ENOENT") return { ok: true, value: { backups: [] } };
+    return fail("internal", `读取备份列表失败：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function restoreBackup(payload) {
+  const name = typeof payload?.name === "string" ? payload.name : "";
+  if (!BACKUP_NAME_RE.test(name) || name !== basename(name)) return fail("bad-request", "备份文件名不合法");
+  const expectedSourceHash = payload?.expectedSourceHash;
+  if (typeof expectedSourceHash !== "string" || !/^[a-f0-9]{64}$/u.test(expectedSourceHash)) {
+    return fail("bad-request", "缺少有效的备份指纹，请刷新备份列表后重试");
+  }
+  return withLock(async () => {
+    let parsed;
+    try {
+      const info = await lstat(dataPath(name));
+      if (!info.isFile() || info.isSymbolicLink()) return fail("bad-request", "备份不是普通文件");
+      if (info.size > MAX_IMPORT_BYTES) return fail("bad-request", `备份文件过大（上限 ${MAX_IMPORT_BYTES} 字节）`);
+      const raw = await readFile(dataPath(name));
+      if (createHash("sha256").update(raw).digest("hex") !== expectedSourceHash) {
+        return fail("conflict", "备份内容已发生变化，请刷新备份列表并重新选择，未修改当前片段库");
+      }
+      parsed = JSON.parse(raw.toString("utf8"));
+    } catch (error) {
+      if (error?.code === "ENOENT") return fail("conflict", "备份已不存在，请刷新备份列表并重新选择，未修改当前片段库");
+      return fail("bad-request", `备份无法读取：${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.snippets)) {
+      return fail("bad-request", "备份文件结构不可识别，未修改当前片段库");
+    }
+    if (Number.isFinite(parsed.version) && parsed.version > STORE_VERSION) {
+      return fail("bad-request", `备份来自更新版本（${parsed.version}），未修改当前片段库`);
+    }
+    const { store, stats } = migrate(parsed);
+    const normalized = { ...store, version: STORE_VERSION };
+    const final = dataPath("snippets.json");
+    try {
+      // 先准备并 fsync 完整恢复文件；当前库无法安全备份时不替换主文件。
+      await mkdir(dataPath(), { recursive: true });
+      const current = await readFile(final, "utf8").catch((error) => {
+        if (error?.code === "ENOENT") return null;
+        throw error;
+      });
+      await atomicallyReplaceStore(normalized, current);
+    } catch (error) {
+      return fail("internal", `恢复备份失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+    touchGeneration += 1;
+    if (touchTimer) {
+      clearTimeout(touchTimer);
+      touchTimer = null;
+    }
+    pendingTouch.clear();
+    pendingCount = 0;
+    const result = view(store, stats.dropped ? [`恢复时跳过 ${stats.dropped} 条无效记录。`] : []);
+    return { ...result, value: { ...result.value, restoredBackup: name } };
+  });
+}
+
+async function atomicallyReplaceStore(store, currentRaw) {
+  const final = dataPath("snippets.json");
+  const tmp = dataPath(`snippets.restore.${process.pid}.${randomUUID()}.tmp`);
+  let fh = null;
+  try {
+    fh = await open(tmp, "w");
+    await fh.writeFile(JSON.stringify(store, null, 2), "utf8");
+    await fh.sync();
+  } finally {
+    if (fh) await fh.close().catch(() => {});
+  }
+  try {
+    if (currentRaw !== null) await writeRotatedBackup(currentRaw);
+    await rename(tmp, final);
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
+}
+
+async function writeRotatedBackup(raw) {
+  const target = dataPath("snippets.json.bak");
+  const tmp = dataPath(`snippets.restore-backup.${process.pid}.${randomUUID()}.tmp`);
+  let fh = null;
+  try {
+    fh = await open(tmp, "w");
+    await fh.writeFile(raw, "utf8");
+    await fh.sync();
+  } finally {
+    if (fh) await fh.close().catch(() => {});
+  }
+  try {
+    await rotateBackups();
+    await rename(tmp, target);
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
 }
 
 // ─────────────────── 命令参数：--cat 只认行尾 ───────────────────
@@ -1772,6 +1906,12 @@ async function dispatch(ctx, endpoint, payload, signal) {
       return { ok: true, value: { id, history: list } };
     }
 
+    case "backups":
+      return listBackups();
+
+    case "restore-backup":
+      return restoreBackup(payload);
+
     case "optimize": {
       let content = typeof payload?.content === "string" ? payload.content : "";
       if (!content.trim() && typeof payload?.id === "string" && payload.id) {
@@ -1784,8 +1924,14 @@ async function dispatch(ctx, endpoint, payload, signal) {
     }
 
     case "export": {
+      const hasIds = payload?.ids !== undefined;
+      if (hasIds && (!Array.isArray(payload.ids) || payload.ids.length === 0 || Array.from(payload.ids).some((id) => typeof id !== "string" || id.trim() === ""))) {
+        return fail("bad-request", "筛选导出必须提供非空的片段 ID 数组");
+      }
       const { store, warnings } = await readAndMigrate();
-      const device = buildExport(store, payload?.ids);
+      const ids = hasIds ? [...new Set(payload.ids)] : undefined;
+      const device = buildExport(store, ids);
+      if (hasIds && device.snippets.length === 0) return fail("bad-request", "没有可导出的匹配片段");
       const json = JSON.stringify(device, null, 2);
       // revealPath（面板「打开」按钮）只想用系统文件管理器打开一个已存在的文件，
       // 不重新落盘、不重新生成内容——否则会覆盖掉用户手工改过的导出文件。
@@ -1798,7 +1944,8 @@ async function dispatch(ctx, endpoint, payload, signal) {
       // payload.write = 文件名（字符串）时，落盘到数据目录的 exports/ 并回传路径。
       // 面板没有文件选择器，走这条路把文件实实在在交到用户手上。
       if (typeof payload?.write === "string") {
-        const fileName = safeExportName(payload.write);
+        const defaultName = hasIds ? "snippets-filtered" : "snippets";
+        const fileName = safeExportName(payload.write.trim() === "" ? defaultName : payload.write);
         if (fileName === null) return fail("bad-request", "导出文件名不合法");
         const target = dataPath("exports", fileName);
         try {
@@ -1858,7 +2005,12 @@ async function dispatch(ctx, endpoint, payload, signal) {
           );
         }
       }
-      const result = await importSnippets({ ...payload, json: raw, rawBytes: raw !== undefined ? byteLength(raw) : 0 });
+      if (typeof raw !== "string") return fail("bad-request", "缺少导入 JSON 内容");
+      const sourceHash = createHash("sha256").update(raw, "utf8").digest("hex");
+      if (typeof payload?.expectedSourceHash === "string" && payload.expectedSourceHash !== sourceHash) {
+        return fail("conflict", "预演后导入文件内容已变化，请重新预演后再确认");
+      }
+      const result = await importSnippets({ ...payload, json: raw, rawBytes: byteLength(raw) }, sourceHash);
       if (result.ok && usedPath) {
         return { ok: true, value: { ...result.value, path: usedPath } };
       }
