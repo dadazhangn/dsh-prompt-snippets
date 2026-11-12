@@ -28,7 +28,9 @@ window.__ModuleLoader__.load({
       "error.reloadFailed": "重新载入失败：该片段可能已被删除。",
       "error.replaceFailed": "替换失败",
       "error.conflict": "该片段已被他处修改",
-      "error.importPathEmpty": "请填写要导入的 JSON 文件路径。",
+      "error.importFileEmpty": "请选择要导入的 JSON 文件。",
+      "error.importFileTooLarge": "文件超过 8 MB 上限，请先拆分文件。",
+      "error.importFileRead": "读取所选文件失败：{message}",
       "notice.defaultsFilled": "已用默认值填充，可在 ✏️ 里改",
       "notice.saved": "已保存",
       "notice.created": "已新建",
@@ -49,6 +51,8 @@ window.__ModuleLoader__.load({
       "edit.reload": "重新载入",
       "edit.name": "名称",
       "edit.namePlaceholder": "片段名称",
+      "edit.copyName": "{name} - 副本",
+      "edit.copyNameNumbered": "{name} - 副本 {number}",
       "edit.category": "分类",
       "edit.categoryPlaceholder": "留空表示不分类",
       "edit.tags": "标签（逗号分隔）",
@@ -79,6 +83,8 @@ window.__ModuleLoader__.load({
       "help.escape": "Esc：关闭当前帮助、表单、搜索面板或插件窗口",
       "help.palette": "Ctrl+Shift+K：打开快捷搜索",
       "help.send": "插入只会放入聊天输入框；发送会提交当前消息。",
+      "help.panelActions": "点名称插入 · ✏️ 编辑 · 📄 克隆 · 🕘 查看历史 · ✨ AI 优化 · 🗑 删除",
+      "help.panelResize": "拖动标题栏移动面板，拖动边缘调整大小。",
       "review.overLong": "优化结果超过单条片段上限，请先精简",
       "review.replacePrompt": "把片段正文替换成优化后的版本",
       "review.original": "原文",
@@ -113,6 +119,8 @@ window.__ModuleLoader__.load({
       "item.edit": "编辑",
       "item.editReadonly": "片段库处于只读状态，禁止编辑",
       "item.history": "查看历史版本",
+      "item.duplicate": "克隆片段",
+      "item.duplicateAria": "克隆「{name}」",
       "item.optimize": "AI 优化（对比后决定）",
       "item.optimizeAria": "AI 优化「{name}」",
       "item.noModel": "当前未配置默认模型",
@@ -155,19 +163,37 @@ window.__ModuleLoader__.load({
       "panel.exporting": "导出中…",
       "panel.export": "⬇ 导出",
       "panel.exportTitle": "把所有片段导出成 JSON 文件，存在数据目录的 exports/ 下",
+      "panel.exportFiltered": "⬇ 导出当前结果（{count}）",
+      "panel.exportFilteredTitle": "只导出当前搜索和视图中显示的片段，保存为独立文件",
       "panel.importing": "导入中…",
       "panel.import": "⬆ 导入",
       "panel.importTitle": "从导出的 JSON 文件导入片段",
       "panel.importReadonly": "片段库处于只读状态，禁止导入",
-      "panel.importPathLabel": "导入文件路径",
-      "panel.importPathPlaceholder": "留空或写文件名时取 exports/snippets.json",
+      "panel.importFileLabel": "选择 JSON 文件",
+      "panel.chooseImportFile": "选择文件…",
+      "panel.importFileHint": "可选择之前导出的片段 JSON 文件，最大 8 MB。",
+      "panel.importFileSelected": "已选择：{name}",
       "panel.importReplaceLabel": "替换模式（未出现在文件里的片段会被移入垃圾桶）",
       "panel.cancel": "取消",
       "panel.importBtn": "导入",
+      "panel.previewImport": "预演导入",
+      "panel.confirmImport": "确认导入",
+      "panel.importPreview": "预演结果：新增 {added} · 更新 {updated} · 跳过 {skipped} · 无效 {dropped} · 移入垃圾桶 {deleted}",
+      "panel.importConflicts": "同名跳过：{names}",
+      "panel.importChanged": "文件或导入模式已变化，请重新预演。",
+      "panel.importKeyboardHint": "Enter 预演 · Ctrl+Enter 确认当前步骤 · Esc 取消",
+      "panel.backups": "备份恢复",
+      "panel.backupsTitle": "查看并恢复本地片段库备份",
+      "panel.backupLoading": "读取备份中…",
+      "panel.backupEmpty": "暂无可用备份",
+      "panel.backupRestore": "恢复",
+      "panel.backupConfirm": "确认恢复此备份？当前库会先保存到轮换备份。",
+      "panel.backupConfirmBtn": "确认恢复",
+      "panel.backupCancel": "取消恢复",
+      "notice.backupRestored": "已从 {name} 恢复片段库",
       "panel.openFile": "打开",
       "panel.openFileTitle": "在系统文件管理器中打开这个文件",
       "panel.undoAll": "全部撤销",
-      "panel.footer": "Esc 关闭 · ↑↓ 选择 · Enter 插入 · Ctrl+Shift+K 打开快捷搜索 · 点名称插入 · ✏️ 编辑 · ✨ 优化 · 🗑 删除 · 拖标题栏移动 · 拖边缘调大小",
       "shortcut.openPalette": "打开片段快捷搜索",
     };
     const en = {
@@ -189,7 +215,9 @@ window.__ModuleLoader__.load({
       "error.reloadFailed": "Reload failed: the snippet may have been deleted.",
       "error.replaceFailed": "Replace failed",
       "error.conflict": "This snippet was modified elsewhere",
-      "error.importPathEmpty": "Enter the path of the JSON file to import.",
+      "error.importFileEmpty": "Choose a JSON file to import.",
+      "error.importFileTooLarge": "The file exceeds the 8 MB limit. Split it before importing.",
+      "error.importFileRead": "Could not read the selected file: {message}",
       "notice.defaultsFilled": "Filled with defaults — edit in ✏️",
       "notice.saved": "Saved",
       "notice.created": "Created",
@@ -210,6 +238,8 @@ window.__ModuleLoader__.load({
       "edit.reload": "Reload",
       "edit.name": "Name",
       "edit.namePlaceholder": "Snippet name",
+      "edit.copyName": "Copy of {name}",
+      "edit.copyNameNumbered": "Copy {number} of {name}",
       "edit.category": "Category",
       "edit.categoryPlaceholder": "Leave empty for no category",
       "edit.tags": "Tags (comma-separated)",
@@ -240,6 +270,8 @@ window.__ModuleLoader__.load({
       "help.escape": "Esc: close the current help, form, search, or plugin window",
       "help.palette": "Ctrl+Shift+K: open quick search",
       "help.send": "Insert places text in the chat composer; Send submits the message.",
+      "help.panelActions": "Click a name to insert · ✏️ Edit · 📄 Duplicate · 🕘 View history · ✨ AI optimize · 🗑 Delete",
+      "help.panelResize": "Drag the title bar to move the panel, or drag an edge to resize it.",
       "review.overLong": "Optimized result exceeds the snippet length limit — please shorten first",
       "review.replacePrompt": "Replace the snippet content with the optimized version",
       "review.original": "Original",
@@ -274,6 +306,8 @@ window.__ModuleLoader__.load({
       "item.edit": "Edit",
       "item.editReadonly": "Snippet store is read-only — editing disabled",
       "item.history": "View version history",
+      "item.duplicate": "Duplicate snippet",
+      "item.duplicateAria": "Duplicate \"{name}\"",
       "item.optimize": "AI optimize (compare before deciding)",
       "item.optimizeAria": "AI optimize \"{name}\"",
       "item.noModel": "No default model configured",
@@ -316,19 +350,37 @@ window.__ModuleLoader__.load({
       "panel.exporting": "Exporting…",
       "panel.export": "⬇ Export",
       "panel.exportTitle": "Export all snippets to a JSON file under exports/ in the data directory",
+      "panel.exportFiltered": "⬇ Export current results ({count})",
+      "panel.exportFilteredTitle": "Export only snippets in the current search and view to a separate file",
       "panel.importing": "Importing…",
       "panel.import": "⬆ Import",
       "panel.importTitle": "Import snippets from an exported JSON file",
       "panel.importReadonly": "Snippet store is read-only — importing disabled",
-      "panel.importPathLabel": "Import file path",
-      "panel.importPathPlaceholder": "Leave empty or use a filename for exports/snippets.json",
+      "panel.importFileLabel": "Choose a JSON file",
+      "panel.chooseImportFile": "Choose file…",
+      "panel.importFileHint": "Choose a previously exported snippet JSON file, up to 8 MB.",
+      "panel.importFileSelected": "Selected: {name}",
       "panel.importReplaceLabel": "Replace mode (snippets not in the file are moved to trash)",
       "panel.cancel": "Cancel",
       "panel.importBtn": "Import",
+      "panel.previewImport": "Preview import",
+      "panel.confirmImport": "Confirm import",
+      "panel.importPreview": "Preview: {added} added · {updated} updated · {skipped} skipped · {dropped} invalid · {deleted} moved to trash",
+      "panel.importConflicts": "Skipped name conflicts: {names}",
+      "panel.importChanged": "The file or import mode changed. Preview again.",
+      "panel.importKeyboardHint": "Enter previews · Ctrl+Enter confirms the current step · Esc cancels",
+      "panel.backups": "Backups",
+      "panel.backupsTitle": "View and restore local library backups",
+      "panel.backupLoading": "Loading backups…",
+      "panel.backupEmpty": "No usable backups",
+      "panel.backupRestore": "Restore",
+      "panel.backupConfirm": "Restore this backup? The current library will be saved in the rotating backups first.",
+      "panel.backupConfirmBtn": "Confirm restore",
+      "panel.backupCancel": "Cancel restore",
+      "notice.backupRestored": "Library restored from {name}",
       "panel.openFile": "Open",
       "panel.openFileTitle": "Open this file in the system file manager",
       "panel.undoAll": "Undo all",
-      "panel.footer": "Esc Close · ↑↓ Select · Enter Insert · Ctrl+Shift+K Open quick search · Click name to insert · ✏️ Edit · ✨ Optimize · 🗑 Delete · Drag title to move · Drag edge to resize",
       "shortcut.openPalette": "Open snippet quick search",
     };
 
@@ -934,6 +986,9 @@ window.__ModuleLoader__.load({
       },
       formWrap: { padding: "0 8px 6px", flexShrink: 0, maxHeight: "60%", overflow: "auto" },
       hintInline: { fontSize: "11px", color: C.danger, paddingTop: "2px" },
+      hintMuted: { fontSize: "11px", color: C.textDim, paddingTop: "2px" },
+      backupRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", padding: "2px 0" },
+      backupText: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", direction: "ltr", fontSize: "11px", color: C.textDim },
       notice: {
         fontSize: "11px",
         color: C.textDim,
@@ -1323,10 +1378,15 @@ window.__ModuleLoader__.load({
       const [deleting, setDeleting] = useState(null); // 正在删除的片段 id
       const [exporting, setExporting] = useState(false); // 正在导出
       const [exportPath, setExportPath] = useState(null); // 上次导出的落盘路径
-      const [importOpen, setImportOpen] = useState(false); // 导入路径输入框是否展开
-      const [importPath, setImportPath] = useState(""); // 导入文件路径
+      const [importOpen, setImportOpen] = useState(false); // 导入文件选择区域是否展开
+      const [selectedImport, setSelectedImport] = useState(null); // { name, json }，仅保留当前选中的导入文件
       const [importReplace, setImportReplace] = useState(false); // 替换而非合并
       const [importing, setImporting] = useState(false); // 正在导入
+      const [importPreview, setImportPreview] = useState(null);
+      const [backupOpen, setBackupOpen] = useState(false);
+      const [backups, setBackups] = useState([]);
+      const [backupsLoading, setBackupsLoading] = useState(false);
+      const [restoringBackup, setRestoringBackup] = useState(null);
       const [deleted, setDeleted] = useState([]); // 最近 5 条 [{id,name}]，可逐条或全部撤销
       const [query, setQuery] = useState("");
       const [selected, setSelected] = useState(-1); // §3.2 键盘 ↑↓ 导航：visible 扁平数组的下标，-1 = 未选中
@@ -1347,7 +1407,20 @@ window.__ModuleLoader__.load({
       const helpCloseRef = useRef(null);
       const lastComposerFocusRef = useRef(null);
       const searchRef = useRef(null);
+      const importFileInputRef = useRef(null);
+      const importChooseButtonRef = useRef(null);
+      const importSubmitButtonRef = useRef(null);
+      const importFileTokenRef = useRef(0);
+      const importToggleRef = useRef(null);
+      const backupToggleRef = useRef(null);
+      const backupRestoreRefs = useRef(Object.create(null));
+      const backupConfirmRef = useRef(null);
       const nameRef = useRef(null);
+      const editorFocusTokenRef = useRef(0);
+      const editingRef = useRef(null);
+      const panelOpenRef = useRef(false);
+      editingRef.current = editing;
+      panelOpenRef.current = open;
       // 面板 DOM 引用：拖拽/缩放期间直接改 style.left/top/width/height，
       // 不触发 React 全量 re-render（那是拖拽卡顿的根因），松手才 commit 进 state。
       const panelRef = useRef(null);
@@ -1461,9 +1534,9 @@ window.__ModuleLoader__.load({
         setTimeout(() => helpButtonRef.current?.focus?.(), 0);
       };
 
-      const cancelFill = () => {
+      const cancelFill = (restoreFocus = true) => {
         setFilling(null);
-        setTimeout(() => searchRef.current?.focus?.(), 0);
+        if (restoreFocus) setTimeout(() => searchRef.current?.focus?.(), 0);
       };
 
       const restoreComposerFocus = () => {
@@ -1473,8 +1546,15 @@ window.__ModuleLoader__.load({
       };
 
       const closePanel = () => {
+        ++editorFocusTokenRef.current;
+        if (editingRef.current?.cloneDraft) setEditing({ ...editingRef.current, cloneDraft: false });
         setOpen(false);
         setTimeout(() => restoreComposerFocus(), 0);
+      };
+
+      const cancelPendingCloneFocus = () => {
+        ++editorFocusTokenRef.current;
+        setEditing((current) => current?.cloneDraft ? { ...current, cloneDraft: false } : current);
       };
 
       const paletteChoose = (snippet, sendAfter = false) => {
@@ -1484,13 +1564,27 @@ window.__ModuleLoader__.load({
 
       const handlePanelEscape = () => {
         if (helpOpen) closeHelp();
-        else if (importOpen) setImportOpen(false);
-        else if (review) {
+        else if (importOpen) {
+          setImportOpen(false);
+          setImportPreview(null);
+          setTimeout(() => importToggleRef.current?.focus?.(), 0);
+        } else if (backupOpen) {
+          if (restoringBackup) {
+            const name = restoringBackup.name;
+            setRestoringBackup(null);
+            setTimeout(() => backupRestoreRefs.current[name]?.focus?.(), 0);
+          } else {
+            setBackupOpen(false);
+            setTimeout(() => backupToggleRef.current?.focus?.(), 0);
+          }
+        } else if (review) {
           if (review.busy) stopOptimize();
           else setReview(null);
         } else if (filling) cancelFill();
-        else if (editing) cancelEdit();
-        else if (history) setHistory(null);
+        else if (editing) {
+          cancelPendingCloneFocus();
+          cancelEdit();
+        } else if (history) setHistory(null);
         else if (query) setQuery("");
         else {
           closePanel();
@@ -1503,6 +1597,22 @@ window.__ModuleLoader__.load({
           const target = e.target;
           const inPalette = !!(target && target.closest && target.closest("#ps-palette"));
           const inPanel = !!(target && target.closest && target.closest("#ps-panel"));
+
+          if (inPanel && helpOpen) {
+            if (e.key === "Tab") {
+              e.preventDefault();
+              e.stopPropagation();
+              helpCloseRef.current?.focus?.();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              closeHelp();
+            } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+            return;
+          }
 
           if (inPalette && e.key === "Escape") {
             e.preventDefault();
@@ -1524,19 +1634,12 @@ window.__ModuleLoader__.load({
             submitFill(true);
             return;
           }
-
-          if (inPanel && helpOpen) {
-            if (e.key === "Tab") {
-              e.preventDefault();
-              helpCloseRef.current?.focus?.();
-              return;
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              e.stopPropagation();
-              closeHelp();
-              return;
-            }
+          if (inPanel && importOpen && e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (importPreview) confirmImport();
+            else previewImport();
+            return;
           }
 
           if ((inPanel || open) && e.key === "Escape") {
@@ -1572,11 +1675,19 @@ window.__ModuleLoader__.load({
           window.removeEventListener("keydown", onKey, true);
           document.removeEventListener("focusin", rememberComposer, true);
         };
-      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, review, filling, editing, history, query, helpOpen]);
+      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, selectedImport, importReplace, importing, importPreview, backupOpen, restoringBackup, review, filling, editing, history, query, helpOpen]);
 
       useEffect(() => {
         if (helpOpen) setTimeout(() => helpCloseRef.current?.focus?.(), 0);
       }, [helpOpen]);
+
+      useEffect(() => {
+        if (importOpen) setTimeout(() => importChooseButtonRef.current?.focus?.(), 0);
+      }, [importOpen]);
+
+      useEffect(() => {
+        if (restoringBackup) setTimeout(() => backupConfirmRef.current?.focus?.(), 0);
+      }, [restoringBackup]);
 
       // §3.1：启动时问一次模型可用性。拿不到就不降级为「假装可用」——
       // 保持预置的可用状态，让点击时的错误提示兜底（老 host 没有这个字段）。
@@ -1747,6 +1858,8 @@ window.__ModuleLoader__.load({
             if (searchRef.current) searchRef.current.focus();
           }, 0);
         } else {
+          ++editorFocusTokenRef.current;
+          if (editingRef.current?.cloneDraft) setEditing({ ...editingRef.current, cloneDraft: false });
           setQuery("");
           // 关面板不丢草稿：editing 保留，重新打开还能接着改
           setFilling(null);
@@ -1910,10 +2023,19 @@ window.__ModuleLoader__.load({
       };
 
       // ────────── 行内编辑 ──────────
+      const closeAuxiliaryPanels = () => {
+        setImportOpen(false);
+        setImportPreview(null);
+        setBackupOpen(false);
+        setRestoringBackup(null);
+      };
+
       const beginEdit = (snippet) => {
-        if (editing && editing.dirty) return; // 不偷偷丢别人的草稿
+        if (readOnly || (editing && (editing.dirty || editing.busy))) return; // 不偷偷丢别人的草稿
+        ++editorFocusTokenRef.current;
         setFilling(null);
         setHistory(null);
+        closeAuxiliaryPanels();
         setEditing({
           id: snippet.id,
           name: snippet.name,
@@ -1935,9 +2057,11 @@ window.__ModuleLoader__.load({
       };
 
       const beginCreate = () => {
-        if (editing && editing.dirty) return;
+        if (readOnly || (editing && (editing.dirty || editing.busy))) return;
+        ++editorFocusTokenRef.current;
         setFilling(null);
         setHistory(null);
+        closeAuxiliaryPanels();
         setEditing({
           id: null,
           name: "",
@@ -1956,6 +2080,59 @@ window.__ModuleLoader__.load({
         setTimeout(() => {
           if (nameRef.current) nameRef.current.focus();
         }, 0);
+      };
+
+      const focusCloneName = () => {
+        const token = ++editorFocusTokenRef.current;
+        setTimeout(() => {
+          const current = editingRef.current;
+          if (token !== editorFocusTokenRef.current || !panelOpenRef.current || !current || current.id !== null || current.cloneDraft !== true) return;
+          if (nameRef.current) {
+            nameRef.current.scrollIntoView?.({ block: "nearest" });
+            nameRef.current.focus();
+            nameRef.current.select?.();
+          }
+        }, 0);
+      };
+
+      const beginDuplicate = (snippet) => {
+        if (readOnly || (editing && (editing.dirty || editing.busy))) return;
+        const usedNames = new Set(snippets.map((item) => item.name));
+        const makeName = (number) => {
+          const template = t(number === 1 ? "edit.copyName" : "edit.copyNameNumbered", { name: "{name}", number });
+          const nameLength = Math.max(0, 120 - (template.length - "{name}".length));
+          return template.replace("{name}", snippet.name.slice(0, nameLength));
+        };
+        let number = 1;
+        let name = makeName(number);
+        while (usedNames.has(name)) name = makeName(++number);
+        const variables = {};
+        for (const [key, value] of Object.entries(snippet.variables || {})) {
+          if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+          variables[key] = { ...value };
+          if (Array.isArray(value.options)) variables[key].options = value.options.slice();
+        }
+        ++editorFocusTokenRef.current;
+        setFilling(null);
+        setHistory(null);
+        closeAuxiliaryPanels();
+        setEditing({
+          id: null,
+          name,
+          category: snippet.category || "",
+          content: snippet.content,
+          variables,
+          tags: Array.isArray(snippet.tags) ? snippet.tags.slice() : [],
+          pinned: false,
+          originalRevision: null,
+          dirty: true,
+          cloneDraft: true,
+          busy: false,
+          conflict: null,
+          hint: null,
+          confirmCancel: false,
+        });
+        focusCloneName();
       };
 
       const patchDraft = (patch) => {
@@ -1984,12 +2161,13 @@ window.__ModuleLoader__.load({
           setEditing({ ...cur, confirmCancel: true, hint: t("edit.confirmDiscard") });
           return;
         }
+        ++editorFocusTokenRef.current;
         setEditing(null);
       };
 
       const saveDraft = (force) => {
         const cur = editing;
-        if (!cur || cur.busy) return;
+        if (!cur || cur.busy || readOnly) return;
         const name = cur.name.trim();
         if (!name) {
           setEditing({ ...cur, hint: t("error.nameEmpty") });
@@ -2013,6 +2191,7 @@ window.__ModuleLoader__.load({
         Promise.resolve(rpc.call(CHANNEL, "save", payload))
           .then((result) => {
             if (result && result.ok) {
+              ++editorFocusTokenRef.current;
               applyResult(result);
               setEditing(null);
               setNotice(cur.id ? t("notice.saved") : t("notice.created"));
@@ -2050,9 +2229,10 @@ window.__ModuleLoader__.load({
                 dirty: false,
                 busy: false,
                 conflict: null,
-                hint: t("notice.loadedLatest"),
+                hint: null,
                 confirmCancel: false,
               });
+              setNotice(t("notice.loadedLatest"));
               // 不能拿 get 的结果去 applyResult：它的 value 只有 snippet，没有 snippets，
               // 会顺手把列表刷成空。列表刷新单独走 load()。
               load();
@@ -2372,22 +2552,31 @@ window.__ModuleLoader__.load({
 
       // ── 导出 / 导入（v1.2 §3.3）──
       // 导出：host 侧写到 <home>/data/prompt-snippets/exports/，这里只把路径告诉用户。
-      // 导入：host 侧读文件，这里只传路径 + 模式。面板不做文件选择器——
-      //   client 拿不到宿主文件系统，让用户在命令里填路径是最小惊讶的做法。
+      // 导入：由浏览器文件选择器读取用户明确选择的 JSON，host 负责校验、预演和落盘。
       const exportAll = () => {
+        startExport({ write: "", reveal: true }, snippets);
+      };
+
+      const exportFiltered = (snapshot = visible) => {
+        if (exporting || snapshot.length === 0) return;
+        startExport({ ids: [...new Set(snapshot.map((snippet) => snippet.id))], write: "snippets-filtered", reveal: true }, snapshot);
+      };
+
+      const startExport = (payload, exportSnapshot) => {
         if (exporting) return;
         setExporting(true);
         setError(null);
         setExportPath(null);
-        // write 让 host 侧落盘并回传绝对路径；文件名留空则用 host 的默认名。
+        const requestCount = exportSnapshot.length;
+        // 全量与筛选导出使用不同默认文件，避免子集覆盖全量备份。
         // reveal:true 让 host 用系统文件管理器直接打开/选中这个文件，免去手动找目录。
-        Promise.resolve(rpc.call(CHANNEL, "export", { write: "", reveal: true }))
+        Promise.resolve(rpc.call(CHANNEL, "export", payload))
           .then((result) => {
             setExporting(false);
             if (result && result.ok) {
               const path = (result.value && result.value.path) || "";
               setExportPath(path);
-              setNotice(t("notice.exported", { count: result.value.count }));
+              setNotice(t("notice.exported", { count: Number.isInteger(result.value.count) ? result.value.count : requestCount }));
               setError(null);
             } else {
               setError(result && result.error ? result.error.message : t("error.exportFailed"));
@@ -2405,33 +2594,120 @@ window.__ModuleLoader__.load({
         Promise.resolve(rpc.call(CHANNEL, "export", { revealPath: path })).catch(() => {});
       };
 
-      const doImport = () => {
+      const previewImport = () => {
         if (importing) return;
-        const target = importPath.trim();
-        if (!target) {
-          setError(t("error.importPathEmpty"));
+        if (!selectedImport) {
+          setError(t("error.importFileEmpty"));
           return;
         }
+        const selectedSnapshot = selectedImport;
+        const selectionToken = importFileTokenRef.current;
         setImporting(true);
         setError(null);
         setExportPath(null);
-        Promise.resolve(rpc.call(CHANNEL, "import", { path: target, source: "panel", mode: importReplace ? "replace" : "merge" }))
+        setImportPreview(null);
+        Promise.resolve(rpc.call(CHANNEL, "import", { json: selectedSnapshot.json, source: "panel", mode: importReplace ? "replace" : "merge", dryRun: true }))
           .then((result) => {
             setImporting(false);
+            if (selectionToken !== importFileTokenRef.current) return;
             if (result && result.ok) {
-              const p = result.value.plan;
-              setNotice(t("notice.imported", { added: p.added, skipped: p.skipped ? t("notice.importedSkipped", { n: p.skipped }) : "", updated: p.updated ? t("notice.importedUpdated", { n: p.updated }) : "" }));
-              setImportOpen(false);
-              setImportPath("");
-              setImportReplace(false);
+              const sourceName = selectedSnapshot.name;
+              setImportPreview({
+                plan: result.value.plan,
+                sourceName,
+                sourceHash: result.value.sourceHash,
+                storeHash: result.value.storeHash,
+                mode: importReplace ? "replace" : "merge",
+              });
               setError(null);
-              load(); // 列表变了，重新拉一次
             } else {
               setError(result && result.error ? result.error.message : t("error.importFailed"));
             }
           })
           .catch((err) => {
             setImporting(false);
+            if (selectionToken !== importFileTokenRef.current) return;
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const confirmImport = () => {
+        if (importing || !importPreview) return;
+        if (!selectedImport || importPreview.sourceName !== selectedImport.name || importPreview.mode !== (importReplace ? "replace" : "merge")) {
+          setImportPreview(null);
+          setError(t("panel.importChanged"));
+          return;
+        }
+        setImporting(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "import", {
+          json: selectedImport.json,
+          source: "panel",
+          mode: importPreview.mode,
+          expectedSourceHash: importPreview.sourceHash,
+          expectedStoreHash: importPreview.storeHash,
+        }))
+          .then((result) => {
+            setImporting(false);
+            if (result && result.ok) {
+              const p = result.value.plan;
+              setNotice(t("notice.imported", { added: p.added, skipped: p.skipped ? t("notice.importedSkipped", { n: p.skipped }) : "", updated: p.updated ? t("notice.importedUpdated", { n: p.updated }) : "" }));
+              setImportOpen(false);
+              setSelectedImport(null);
+              setImportReplace(false);
+              setImportPreview(null);
+              setError(null);
+              setTimeout(() => importToggleRef.current?.focus?.(), 0);
+              load(); // 列表变了，重新拉一次
+            } else {
+              if (result?.error?.code === "conflict") setImportPreview(null);
+              setError(result && result.error ? result.error.message : t("error.importFailed"));
+            }
+          })
+          .catch((err) => {
+            setImporting(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const loadBackups = () => {
+        setBackupsLoading(true);
+        Promise.resolve(rpc.call(CHANNEL, "backups", {}))
+          .then((result) => {
+            setBackupsLoading(false);
+            if (result?.ok) setBackups(result.value?.backups || []);
+            else setError(result?.error?.message || t("error.readFailed"));
+          })
+          .catch((err) => {
+            setBackupsLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const restoreSelectedBackup = () => {
+        if (!restoringBackup) return;
+        setBackupsLoading(true);
+        Promise.resolve(rpc.call(CHANNEL, "restore-backup", { name: restoringBackup.name, expectedSourceHash: restoringBackup.sourceHash }))
+          .then((result) => {
+            setBackupsLoading(false);
+            if (result?.ok) {
+              applyResult(result);
+              setNotice(t("notice.backupRestored", { name: restoringBackup.name }));
+              setRestoringBackup(null);
+              setBackupOpen(false);
+              setTimeout(() => backupToggleRef.current?.focus?.(), 0);
+              loadBackups();
+            } else {
+              if (result?.error?.code === "conflict") {
+                setRestoringBackup(null);
+                loadBackups();
+                setTimeout(() => backupToggleRef.current?.focus?.(), 0);
+              }
+              setError(result?.error?.message || t("error.restoreFailed"));
+            }
+          })
+          .catch((err) => {
+            setBackupsLoading(false);
             setError(String((err && err.message) || err));
           });
       };
@@ -2511,6 +2787,7 @@ window.__ModuleLoader__.load({
       }, [query, snippets, view]);
       const selectedSnippet = selected >= 0 && selected < visible.length ? visible[selected] : null;
       const trimmedQuery = query.trim();
+      const isFiltered = trimmedQuery !== "" || view !== "all";
 
       // ────────── 渲染：编辑器 ──────────
       const renderEditor = () => {
@@ -2519,7 +2796,7 @@ window.__ModuleLoader__.load({
         const names = varNamesOf(e.content).filter((n) => !isDynamic(n));
         return h(
           "div",
-          { style: style.editor },
+          { style: style.editor, onMouseDown: (ev) => ev.stopPropagation() },
           e.conflict
             ? h(
               "div",
@@ -2744,7 +3021,7 @@ window.__ModuleLoader__.load({
                   }),
             );
           }),
-          h("div", { style: style.hintInline }, t("fill.keyboardHint")),
+          h("div", { style: style.hintMuted }, t("fill.keyboardHint")),
           h(
             "div",
             { style: style.actions },
@@ -2971,11 +3248,24 @@ window.__ModuleLoader__.load({
                 className: "ps-icon",
                 style: readOnly ? { ...style.icon, ...style.iconBusy } : style.icon,
                 onClick: () => beginEdit(s),
-                disabled: readOnly || (editing !== null && editing.id !== s.id && editing.dirty),
+                disabled: readOnly || (editing !== null && (editing.dirty || editing.busy)),
                 title: readOnly ? t("item.editReadonly") : t("item.edit"),
                 "aria-label": `编辑「${s.name}」`,
               },
               "✏️",
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "ps-icon",
+                style: readOnly || (editing !== null && (editing.dirty || editing.busy)) ? { ...style.icon, ...style.iconBusy } : style.icon,
+                onClick: () => beginDuplicate(s),
+                disabled: readOnly || (editing !== null && (editing.dirty || editing.busy)),
+                title: readOnly ? t("item.editReadonly") : t("item.duplicate"),
+                "aria-label": t("item.duplicateAria", { name: s.name }),
+              },
+              "📄",
             ),
             h(
               "button",
@@ -3042,6 +3332,7 @@ window.__ModuleLoader__.load({
       );
 
       const showHistory = (snippet) => {
+        closeAuxiliaryPanels();
         if (history && history.id === snippet.id) {
           setHistory(null);
           return;
@@ -3148,9 +3439,9 @@ window.__ModuleLoader__.load({
             { style: style.historyBox },
             h("div", { style: style.label }, t("history.title", { name: hh.name })),
             hh.busy
-              ? h("div", { style: style.hintInline }, t("history.loading"))
+              ? h("div", { style: style.hintMuted }, t("history.loading"))
               : hh.list.length === 0
-                ? h("div", { style: style.hintInline }, t("history.empty"))
+                ? h("div", { style: style.hintMuted }, t("history.empty"))
                 : hh.list.map((v, i) =>
                   h(
                     "div",
@@ -3217,14 +3508,19 @@ window.__ModuleLoader__.load({
                   className: "ps-ghost",
                   style: { ...style.btnGhost, marginTop: "8px" },
                   onClick: () => {
+                    if (readOnly || (editing && (editing.dirty || editing.busy))) return;
                     setQuery("");
                     setSelected(-1);
                     beginCreate();
                     setTimeout(() => {
                       if (nameRef.current) nameRef.current.value = trimmedQuery;
-                      if (nameRef.current) nameRef.current.focus();
+                      if (nameRef.current) {
+                        nameRef.current.scrollIntoView?.({ block: "nearest" });
+                        nameRef.current.focus();
+                      }
                     }, 0);
                   },
+                  disabled: readOnly || (editing !== null && (editing.dirty || editing.busy)),
                   title: t("panel.newTitle"),
                 },
                 trimmedQuery ? t("panel.newFromQuery", { query: trimmedQuery }) : t("panel.new"),
@@ -3333,7 +3629,7 @@ window.__ModuleLoader__.load({
                   onMouseDown: (e) => e.stopPropagation(),
                 },
                 h("div", { style: { fontSize: "15px", fontWeight: 650 } }, t("help.title")),
-                ["help.palette", "help.navigation", "help.fill", "help.escape", "help.send"].map((key) =>
+                ["help.palette", "help.navigation", "help.fill", "help.escape", "help.send", "help.panelActions", "help.panelResize"].map((key) =>
                   h("div", { key, style: { fontSize: "13px", lineHeight: 1.5, color: C.textDim } }, t(key)),
                 ),
                 h(
@@ -3453,7 +3749,7 @@ window.__ModuleLoader__.load({
                       className: "ps-ghost",
                       style: readOnly ? { ...style.btnGhost, ...style.btnDisabled } : style.btnGhost,
                       onClick: beginCreate,
-                      disabled: readOnly || (editing !== null && editing.dirty),
+                      disabled: readOnly || (editing !== null && (editing.dirty || editing.busy)),
                       title: readOnly ? t("panel.newBtnReadonly") : t("panel.newBtnTitle"),
                     },
                     t("panel.newBtn"),
@@ -3470,6 +3766,20 @@ window.__ModuleLoader__.load({
                     },
                     exporting ? t("panel.exporting") : t("panel.export"),
                   ),
+                  isFiltered
+                    ? h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "ps-ghost",
+                        style: exporting || visible.length === 0 ? { ...style.btnGhost, ...style.btnDisabled } : style.btnGhost,
+                        onClick: () => exportFiltered(),
+                        disabled: exporting || visible.length === 0,
+                        title: t("panel.exportFilteredTitle"),
+                      },
+                      exporting ? t("panel.exporting") : t("panel.exportFiltered", { count: visible.length }),
+                    )
+                    : null,
                   h(
                     "button",
                     {
@@ -3478,12 +3788,42 @@ window.__ModuleLoader__.load({
                       style: importOpen ? { ...style.btnGhost, ...style.itemEditing } : style.btnGhost,
                       onClick: () => {
                         setImportOpen((prev) => !prev);
+                        setImportPreview(null);
+                        if (!importOpen) {
+                          setHistory(null);
+                          setBackupOpen(false);
+                          setRestoringBackup(null);
+                        }
                         setError(null);
                       },
+                      ref: importToggleRef,
                       disabled: readOnly,
                       title: readOnly ? t("panel.importReadonly") : t("panel.importTitle"),
                     },
                     t("panel.import"),
+                  ),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "ps-ghost",
+                      style: backupOpen ? { ...style.btnGhost, ...style.itemEditing } : style.btnGhost,
+                      onClick: () => {
+                        const next = !backupOpen;
+                        setBackupOpen(next);
+                        setRestoringBackup(null);
+                        if (next) {
+                          setHistory(null);
+                          setImportOpen(false);
+                          setImportPreview(null);
+                          loadBackups();
+                        }
+                        setError(null);
+                      },
+                      ref: backupToggleRef,
+                      title: t("panel.backupsTitle"),
+                    },
+                    t("panel.backups"),
                   ),
                 ),
               ),
@@ -3494,26 +3834,61 @@ window.__ModuleLoader__.load({
                 h(
                   "div",
                   { style: style.editor },
-                  h("div", { style: style.label }, t("panel.importPathLabel")),
+                  h("div", { style: style.label }, t("panel.importFileLabel")),
                   h("input", {
-                    type: "text",
-                    className: "ps-input",
-                    style: style.input,
-                    value: importPath,
-                    placeholder: t("panel.importPathPlaceholder"),
-                    onChange: (e) => setImportPath(e.target.value),
-                    onKeyDown: (e) => {
-                      if (e.key === "Enter") doImport();
-                      if (e.key === "Escape") setImportOpen(false);
+                    type: "file",
+                    style: { display: "none" },
+                    ref: importFileInputRef,
+                    tabIndex: -1,
+                    accept: ".json,application/json",
+                    disabled: importing,
+                    onChange: async (e) => {
+                      const token = ++importFileTokenRef.current;
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      setImportPreview(null);
+                      setSelectedImport(null);
+                      setError(null);
+                      if (!file) return;
+                      if (file.size > 8_000_000) {
+                        setError(t("error.importFileTooLarge"));
+                        return;
+                      }
+                      try {
+                        const json = await file.text();
+                        if (token === importFileTokenRef.current) {
+                          setSelectedImport({ name: file.name, json });
+                          setTimeout(() => importSubmitButtonRef.current?.focus?.(), 0);
+                        }
+                      } catch (err) {
+                        if (token === importFileTokenRef.current) setError(t("error.importFileRead", { message: String((err && err.message) || err) }));
+                      }
                     },
                   }),
+                  h("div", { style: style.addRowInner },
+                    h("button", {
+                      type: "button",
+                      className: "ps-ghost",
+                      style: style.btnGhost,
+                      ref: importChooseButtonRef,
+                      disabled: importing,
+                      onClick: () => importFileInputRef.current?.click?.(),
+                    }, t("panel.chooseImportFile")),
+                    selectedImport
+                      ? h("span", { style: style.backupText, role: "status", title: selectedImport.name }, t("panel.importFileSelected", { name: selectedImport.name }))
+                      : null,
+                  ),
+                  h("div", { style: style.hintMuted }, t("panel.importFileHint")),
                   h(
                     "label",
                     { style: style.checkWrap },
                     h("input", {
                       type: "checkbox",
                       checked: importReplace,
-                      onChange: (e) => setImportReplace(e.target.checked),
+                      onChange: (e) => {
+                        setImportReplace(e.target.checked);
+                        setImportPreview(null);
+                      },
                     }),
                     h("span", { style: style.label }, t("panel.importReplaceLabel")),
                   ),
@@ -3522,7 +3897,11 @@ window.__ModuleLoader__.load({
                     { style: style.actions },
                     h(
                       "button",
-                      { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => setImportOpen(false) },
+                      { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: () => {
+                        setImportOpen(false);
+                        setImportPreview(null);
+                        setTimeout(() => importToggleRef.current?.focus?.(), 0);
+                      } },
                       t("panel.cancel"),
                     ),
                     h(
@@ -3531,13 +3910,81 @@ window.__ModuleLoader__.load({
                         type: "button",
                         className: "ps-primary",
                         style: importing ? { ...style.btnPrimary, ...style.btnDisabled } : style.btnPrimary,
+                        ref: importSubmitButtonRef,
                         disabled: importing,
-                        onClick: doImport,
+                        onClick: importPreview ? confirmImport : previewImport,
                       },
-                      importing ? t("panel.importing") : t("panel.importBtn"),
+                      importing ? t("panel.importing") : importPreview ? t("panel.confirmImport") : t("panel.previewImport"),
                     ),
                   ),
+                  h("div", { style: style.hintMuted }, t("panel.importKeyboardHint")),
+                  importPreview
+                    ? h(
+                      "div",
+                      { style: style.hintMuted, role: "status" },
+                      t("panel.importPreview", importPreview.plan),
+                      importPreview.plan.conflicts?.length
+                        ? h("div", { style: style.hintMuted }, t("panel.importConflicts", {
+                          names: importPreview.plan.conflicts.map((item) => item.name).join("、"),
+                        }))
+                        : null,
+                    )
+                    : null,
                 ),
+              )
+              : null,
+            backupOpen
+              ? h(
+                "div",
+                { style: style.formWrap, role: "region", "aria-label": t("panel.backups") },
+                h("div", { style: style.label }, t("panel.backups")),
+                backupsLoading
+                  ? h("div", { style: style.hintMuted }, t("panel.backupLoading"))
+                  : backups.length === 0
+                    ? h("div", { style: style.hintMuted }, t("panel.backupEmpty"))
+                    : backups.map((backup) => h(
+                      "div",
+                      { key: backup.name, style: style.backupRow },
+                      h("span", { style: style.backupText, title: backup.name }, `${backup.name} · ${fmtTime(backup.modifiedAt)} · ${backup.size} B`),
+                      h("button", {
+                        type: "button",
+                        className: "ps-ghost",
+                        style: style.btnGhost,
+                        disabled: backupsLoading,
+                        ref: (el) => {
+                          if (el) backupRestoreRefs.current[backup.name] = el;
+                          else delete backupRestoreRefs.current[backup.name];
+                        },
+                        onClick: () => setRestoringBackup(backup),
+                      }, t("panel.backupRestore")),
+                    )),
+                restoringBackup
+                  ? h(
+                    "div",
+                    { style: style.editor, role: "alertdialog", "aria-label": t("panel.backupConfirm") },
+                    h("div", { style: style.hintInline }, t("panel.backupConfirm")),
+                    h("div", { style: style.actions },
+                      h("button", {
+                        type: "button",
+                        className: "ps-ghost",
+                        style: style.btnGhost,
+                        onClick: () => {
+                          const name = restoringBackup.name;
+                          setRestoringBackup(null);
+                          setTimeout(() => backupRestoreRefs.current[name]?.focus?.(), 0);
+                        },
+                      }, t("panel.backupCancel")),
+                      h("button", {
+                        type: "button",
+                        className: "ps-primary",
+                        style: style.btnPrimary,
+                        ref: backupConfirmRef,
+                        disabled: backupsLoading,
+                        onClick: restoreSelectedBackup,
+                      }, t("panel.backupConfirmBtn")),
+                    ),
+                  )
+                  : null,
               )
               : null,
             exportPath
@@ -3592,11 +4039,6 @@ window.__ModuleLoader__.load({
                   : null,
               )
               : null,
-            h(
-              "div",
-              { style: style.hint },
-              t("panel.footer"),
-            ),
           ),
       );
     }

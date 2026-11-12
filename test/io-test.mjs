@@ -318,6 +318,27 @@ setGroup("12. 面板路径边界");
   const insidePath = resolve(EXPORTS, "roundtrip-2.json");
   const panelInside = await call("import", { path: insidePath, source: "panel", dryRun: true, mode: "merge" });
   check("面板允许导入 exports 内文件", panelInside.ok === true, panelInside.error?.message);
+  const previewSource = await readFile(insidePath, "utf8");
+  const preview = await call("import", { path: insidePath, source: "panel", dryRun: true, mode: "merge" });
+  await call("save", { name: "预演后新增", content: "库已变化" });
+  const staleStorePreview = await call("import", {
+    path: insidePath,
+    source: "panel",
+    mode: "merge",
+    expectedSourceHash: preview.value.sourceHash,
+    expectedStoreHash: preview.value.storeHash,
+  });
+  check("预演后片段库变化会阻止导入", staleStorePreview.ok === false && staleStorePreview.error.code === "conflict", staleStorePreview.error?.message);
+  await reset({ version: 4, snippets: [] });
+  await writeFile(insidePath, JSON.stringify({ snippets: [{ name: "预演后变化", content: "不应写入" }] }), "utf8");
+  const stalePreview = await call("import", {
+    path: insidePath,
+    source: "panel",
+    mode: "merge",
+    expectedSourceHash: preview.value.sourceHash,
+  });
+  check("预演后文件变化会阻止导入", stalePreview.ok === false && stalePreview.error.code === "conflict", stalePreview.error?.message);
+  await writeFile(insidePath, previewSource, "utf8");
   const shortPanelInside = await call("import", { path: "exports/roundtrip-2", source: "panel", dryRun: true, mode: "merge" });
   check("面板路径保留 exports/ 与省略后缀的兼容", shortPanelInside.ok === true, shortPanelInside.error?.message);
   const missingPanelFile = await call("import", { path: "exports/not-created-yet.json", source: "panel", mode: "merge" });

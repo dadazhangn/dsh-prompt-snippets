@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-snippets",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "type": "module",
   "description": "Save reusable prompt snippets with categories, {{placeholder}} fill forms & dropdown enums, version history, pinned/tag search, streaming AI rewrite, and crash-safe atomic JSON storage — insert them from the composer toolbar via a floating panel.",
   "keywords": [

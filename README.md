@@ -78,6 +78,7 @@ Commands that treat the remaining input as a name accept spaces. `/snippet add` 
 - **Get to the prompt quickly.** Search by name, category, tag, or content. Use the floating library or the global keyboard palette; favorites appear first.
 - **Reuse a template without editing it every time.** Add `{{variables}}` and fill them in when inserting. Optional defaults, required fields, dropdown choices, and `{{date}}`, `{{time}}`, and `{{datetime}}` are supported.
 - **Keep useful prompts organized.** Add categories and tags, pin favorites, sort by recent use, and revisit earlier versions.
+- **Create variations and portable subsets.** Duplicate a snippet with its variables and tags, or export only the snippets in the current search or view.
 - **Stay in control of AI rewrites.** Compare the original with the generated draft, edit the draft, then choose whether to insert it or replace the saved snippet. Rewrites never overwrite a snippet automatically.
 - **Keep your library portable.** Import and export JSON backups. Data is stored locally, with atomic writes and recoverable backups.
 
@@ -95,7 +96,9 @@ The selected snippet is sent to your configured model service only when you star
 
 The library is stored at `<DSH_HOME>/data/prompt-snippets/snippets.json`. If `DSH_HOME` is unset, DSH uses `~/.dsh`.
 
-Writes use a temporary file and atomic replacement. Previous data is retained in rotating `.bak` files; malformed data is preserved as a recovery copy. Deletion is reversible, and each snippet keeps up to 20 prior versions. Import supports merge, replace, and dry-run modes.
+Writes use a temporary file and atomic replacement. Rotating `.bak` files can be viewed and restored from **Backups** in the panel; the current library is saved to the rotation before a restore. Malformed data is preserved as a recovery copy. Deletion is reversible, and each snippet keeps up to 20 prior versions.
+
+Import first previews the number of items to add, update, skip, or move to trash, and lists name conflicts. Nothing is written until you confirm. If the source file changes after preview, preview it again.
 
 ## Contributing
 

@@ -11,6 +11,9 @@ let slots = [];
 let cursor = 0;
 let effects = [];
 let pendingRender = null;
+let trackDependencies = false;
+const sameDependencies = (previous, next) => Array.isArray(previous) && Array.isArray(next)
+  && previous.length === next.length && next.every((value, i) => Object.is(value, previous[i]));
 
 function useState(init) {
   const i = cursor++;
@@ -21,17 +24,21 @@ function useState(init) {
   };
   return [slots[i], set];
 }
-function useMemo(fn) {
-  return fn();
+function useMemo(fn, deps) {
+  if (!trackDependencies) return fn();
+  const i = cursor++;
+  if (!sameDependencies(slots[i]?.deps, deps)) slots[i] = { deps, value: fn() };
+  return slots[i].value;
 }
 function useRef(init) {
   const i = cursor++;
   if (!(i in slots)) slots[i] = { current: init };
   return slots[i];
 }
-function useEffect(fn) {
+function useEffect(fn, deps) {
   const i = cursor++;
-  effects.push({ i, fn });
+  if (trackDependencies && sameDependencies(slots[i]?.deps, deps)) return;
+  effects.push({ i, fn, deps });
 }
 function rerender(Component, props) {
   cursor = 0;
@@ -113,6 +120,8 @@ const fakeRpc = {
         value: { json: "{}", count: DATA.length, path: "C:\\fake\\exports\\snippets.json" },
       });
     }
+    if (endpoint === "backups") return Promise.resolve({ ok: true, value: { backups: [{ name: "snippets.json.bak", size: 128, modifiedAt: 1_800_000_000_000, sourceHash: "a".repeat(64) }] } });
+    if (endpoint === "restore-backup") return Promise.resolve({ ok: true, value: { snippets: DATA, restoredBackup: payload.name } });
     return Promise.resolve({ ok: false, error: { code: "x", message: "unknown" } });
   },
 };
@@ -230,9 +239,11 @@ helpButton?.props?.onClick();
 tree = rerender(registered.Component, props);
 const helpTexts = flat(tree).filter((node) => typeof node === "string");
 check("快捷键帮助展示导航和插入/发送说明", helpTexts.some((text) => text.includes("方向键：选择片段")) && helpTexts.some((text) => text.includes("Ctrl+Enter：插入并发送")));
+check("快捷键帮助包含面板操作与移动调整说明", helpTexts.some((text) => text.includes("📄 克隆") && text.includes("🕘 查看历史")) && helpTexts.some((text) => text.includes("拖动标题栏移动面板")));
 flat(tree).find((node) => node?.props?.["aria-label"] === "关闭快捷键帮助")?.props?.onClick();
 tree = rerender(registered.Component, props);
 check("快捷键帮助关闭后返回面板", !!tree.children.find((node) => node?.props?.id === "ps-panel") && !flat(tree).some((node) => node?.props?.["aria-label"] === "快捷键与键盘操作"));
+check("面板底部不再重复显示帮助说明", !flat(tree).some((node) => typeof node === "string" && node.includes("拖动标题栏移动面板")));
 check("有分类分组标题", panelText.includes("开发") && panelText.includes("写作"));
 check("渲染了搜索框", flat(panel).some((x) => x?.props?.placeholder?.includes("搜索")));
 
@@ -656,6 +667,21 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   // —— 冲突：编辑后保存，服务端 revision 变了 ——
   findIcon(t, "编辑「甲」").props.onClick();
   t = rerender(registered.Component, props);
+  {
+    const content = flat(panelOf(t)).find((node) => node?.type === "textarea" && node?.props?.className === "ps-textarea");
+    const editor = flat(panelOf(t)).find((node) => node?.type === "div"
+      && node.children?.some((child) => child?.type === "label" && flat(child).includes(content)));
+    let stopped = 0;
+    let prevented = 0;
+    check("正文编辑区存在", !!content && !!editor);
+    editor?.props?.onMouseDown?.({
+      target: content,
+      stopPropagation() { stopped += 1; },
+      preventDefault() { prevented += 1; },
+    });
+    check("点击正文编辑区不会把鼠标事件传给 DSH 输入框", stopped === 1);
+    check("点击正文编辑区保留浏览器默认聚焦行为", stopped === 1 && prevented === 0);
+  }
   flat(panelOf(t)).find((n) => n?.props?.className === "ps-input" && n?.props?.value === "甲").props.onChange({ target: { value: "甲改" } });
   t = rerender(registered.Component, props);
   findBtnByText(t, "保存").props.onClick();
@@ -780,6 +806,10 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   fakeRpc.call = (channel, endpoint, payload) => {
     calls.push({ channel, endpoint, payload });
     if (endpoint === "list") return Promise.resolve({ ok: true, value: { version: 3, snippets: DATA } });
+    if (endpoint === "save") {
+      const created = { id: "clone-created", ...payload, revision: 1, useCount: 0, lastUsedAt: null, createdAt: 4, updatedAt: 4, deletedAt: null };
+      return Promise.resolve({ ok: true, value: { snippets: [...DATA, created], snippet: created } });
+    }
     if (endpoint === "export") {
       return Promise.resolve({
         ok: true,
@@ -787,11 +817,16 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
       });
     }
     if (endpoint === "import") {
+      const plan = { added: 2, updated: 0, skipped: 0, deleted: 0, dropped: 0, conflicts: [] };
       return Promise.resolve({
         ok: true,
-        value: { path: payload.path, changed: true, plan: { added: 2, updated: 0, skipped: 0, dropped: 0, conflicts: [] } },
+        value: payload.dryRun
+          ? { dryRun: true, sourceHash: "preview-hash", storeHash: "store-preview-hash", plan }
+          : { changed: true, plan },
       });
     }
+    if (endpoint === "backups") return Promise.resolve({ ok: true, value: { backups: [{ name: "snippets.json.bak", size: 128, modifiedAt: 1_800_000_000_000, sourceHash: "a".repeat(64) }] } });
+    if (endpoint === "restore-backup") return Promise.resolve({ ok: true, value: { snippets: DATA, restoredBackup: payload.name } });
     return Promise.resolve({ ok: false, error: { code: "x", message: "unknown" } });
   };
   const btnToggle = () => {
@@ -829,8 +864,52 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   await new Promise((r) => setImmediate(r));
   const expCalls = calls.filter((c) => c.endpoint === "export");
   check("点击导出调用 export 端点", expCalls.length === before + 1, String(expCalls.length));
-  check("导出请求带 write 触发落盘", expCalls.at(-1)?.payload?.write === "", JSON.stringify(expCalls.at(-1)?.payload));
+  check("全量导出传空文件名以使用全量默认文件", expCalls.at(-1)?.payload?.write === "" && expCalls.at(-1)?.payload?.ids === undefined, JSON.stringify(expCalls.at(-1)?.payload));
   check("导出请求带 reveal 一键打开", expCalls.at(-1)?.payload?.reveal === true, JSON.stringify(expCalls.at(-1)?.payload));
+
+  const searchInput = flat(panel0).find((n) => n?.props?.placeholder?.includes("搜索名称"));
+  searchInput?.props?.onChange?.({ target: { value: "代码" } });
+  const filteredTree = rerender(registered.Component, props);
+  const filteredPanel = filteredTree.children.find((node) => node?.props?.id === "ps-panel");
+  const filteredBtn = flat(filteredPanel).find((n) => n?.props?.className === "ps-ghost" && flat(n).some((value) => typeof value === "string" && value.includes("导出当前结果")));
+  check("搜索时显示筛选导出及命中条数", !!filteredBtn && flat(filteredBtn).includes("⬇ 导出当前结果（1）"));
+  filteredBtn?.props?.onClick?.({ type: "click", preventDefault() {} });
+  await new Promise((r) => setImmediate(r));
+  const filteredCall = calls.filter((call) => call.endpoint === "export").at(-1);
+  check("筛选导出传当前可见 ID 快照及独立文件名", JSON.stringify(filteredCall?.payload?.ids) === JSON.stringify(["1"]) && filteredCall?.payload?.write === "snippets-filtered", JSON.stringify(filteredCall?.payload));
+
+  searchInput?.props?.onChange?.({ target: { value: "没有匹配" } });
+  const emptyTree = rerender(registered.Component, props);
+  const emptyPanel = emptyTree.children.find((node) => node?.props?.id === "ps-panel");
+  const emptyExport = flat(emptyPanel).find((n) => n?.props?.className === "ps-ghost" && flat(n).some((value) => typeof value === "string" && value.includes("导出当前结果")));
+  check("筛选无结果时导出按钮禁用", !!emptyExport && emptyExport.props.disabled === true);
+
+  // 克隆测试回到有结果的全量列表，避免继承上面的空搜索状态。
+  searchInput?.props?.onChange?.({ target: { value: "" } });
+  const duplicatePanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  const duplicateButton = flat(duplicatePanel).find((node) => node?.props?.["aria-label"] === "克隆「代码审查」");
+  check("片段行提供可访问的克隆操作", !!duplicateButton);
+  DATA[0].variables = { 代码: { label: "待审查代码", default: "代码内容", options: ["中文", "英文"] } };
+  duplicateButton?.props?.onClick?.();
+  let cloneTree = rerender(registered.Component, props);
+  let clonePanel = cloneTree.children.find((node) => node?.props?.id === "ps-panel");
+  let cloneName = flat(clonePanel).find((node) => node?.props?.placeholder === "片段名称");
+  check("克隆打开底部新建编辑器并带副本名称", !!cloneName && cloneName.props.value === "代码审查 - 副本");
+  const cloneContent = flat(clonePanel).find((node) => node?.type === "textarea" && node?.props?.className === "ps-textarea" && String(node.props.value).includes("{{代码}}"));
+  check("克隆保留片段正文", cloneContent?.props?.value === DATA[0].content);
+  cloneContent?.props?.onChange?.({ target: { value: "副本修改 {{代码}}" } });
+  cloneTree = rerender(registered.Component, props);
+  clonePanel = cloneTree.children.find((node) => node?.props?.id === "ps-panel");
+  cloneName = flat(clonePanel).find((node) => node?.props?.placeholder === "片段名称");
+  cloneName?.props?.onChange?.({ target: { value: "代码审查 - 副本" } });
+  const cloneSave = flat(clonePanel).find((node) => node?.props?.className === "ps-primary" && flat(node).includes("保存"));
+  cloneSave?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const cloneSaveCall = calls.filter((call) => call.endpoint === "save").at(-1);
+  check("克隆保存走新建请求，不带源片段 ID 或 revision", cloneSaveCall?.payload?.id === undefined && cloneSaveCall?.payload?.expectedRevision === undefined, JSON.stringify(cloneSaveCall?.payload));
+  check("克隆默认不置顶", cloneSaveCall?.payload?.pinned === false);
+  check("克隆保留变量元数据并深拷贝选项", cloneSaveCall?.payload?.variables?.代码?.label === "待审查代码" && cloneSaveCall?.payload?.variables?.代码?.options?.join(",") === "中文,英文" && cloneSaveCall.payload.variables.代码 !== DATA[0].variables.代码 && cloneSaveCall.payload.variables.代码.options !== DATA[0].variables.代码.options);
+  DATA[0].variables = undefined;
 
   const t2 = rerender(registered.Component, props);
   const p2 = t2.children.find((c) => c?.props?.id === "ps-panel");
@@ -872,54 +951,201 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   const p0 = t.children.find((c) => c?.props?.id === "ps-panel");
   const importToggle = flat(p0).find((n) => n?.props?.className === "ps-ghost" && flat(n).includes("⬆ 导入"));
   check("面板渲染出导入按钮", !!importToggle);
-  check("导入表单默认收起", !flat(p0).some((n) => n?.props?.placeholder?.includes("exports/snippets.json")));
+  check("导入表单默认收起", !flat(p0).some((n) => n?.props?.type === "file"));
 
   importToggle?.props?.onClick?.();
   t = rerender(registered.Component, props);
   let p = t.children.find((c) => c?.props?.id === "ps-panel");
-  const pathInput = flat(p).find((n) => n?.props?.placeholder?.includes("exports/snippets.json"));
-  check("点击导入展开路径输入框", !!pathInput);
+  const fileInput = flat(p).find((n) => n?.props?.type === "file");
+  const chooseFileButton = flat(p).find((n) => n?.type === "button" && n.children?.includes("选择文件…"));
+  check("点击导入展开 JSON 文件选择器", !!fileInput && fileInput.props.accept.includes(".json"));
+  check("导入表单提供可聚焦的文件选择按钮", !!chooseFileButton?.props?.ref && "current" in chooseFileButton.props.ref);
+  {
+    const helpButton = flat(p).find((node) => node?.props?.["aria-label"] === "快捷键帮助");
+    helpButton?.props?.onClick?.();
+    t = rerender(registered.Component, props);
+    const realAdd = window.addEventListener;
+    let panelKeyHandler = null;
+    window.addEventListener = (type, handler) => {
+      if (type === "keydown") panelKeyHandler = handler;
+    };
+    const helpEscapeEffect = effects.filter((entry) => entry.fn.toString().includes("inPanel && helpOpen")).at(-1);
+    const cleanup = helpEscapeEffect?.fn();
+    panelKeyHandler?.({
+      target: { closest: (selector) => selector === "#ps-panel" ? {} : null },
+      key: "Escape",
+      preventDefault() {},
+      stopPropagation() {},
+    });
+    t = rerender(registered.Component, props);
+    const panelAfterEscape = t.children.find((c) => c?.props?.id === "ps-panel");
+    check("导入表单上打开快捷键帮助时 Esc 先关闭帮助", !flat(panelAfterEscape).some((node) => node?.props?.role === "dialog" && node?.props?.["aria-label"] === "快捷键与键盘操作"));
+    check("关闭快捷键帮助后导入表单仍打开", !!flat(panelAfterEscape).find((node) => node?.props?.type === "file"));
+    cleanup?.();
+    window.addEventListener = realAdd;
+  }
+  let importFocusCount = 0;
+  chooseFileButton.props.ref.current = { focus() { importFocusCount++; } };
+  const importFocusEffect = effects.filter((entry) => entry.fn.toString().includes("importChooseButtonRef.current")).at(-1);
+  importFocusEffect?.fn();
+  await new Promise((r) => setImmediate(r));
+  check("展开导入表单自动聚焦文件选择按钮", importFocusCount === 1);
   check("导入有替换模式勾选框", flat(p).some((n) => n?.props?.type === "checkbox"));
 
-  // 空路径不发请求
+  // 未选择文件不发请求
   const before = calls.filter((c) => c.endpoint === "import").length;
   const submitBtn = flat(p).find(
-    (n) => n?.props?.className === "ps-primary" && Array.isArray(n.children) && n.children.join("") === "导入"
+    (n) => n?.props?.className === "ps-primary" && Array.isArray(n.children) && n.children.join("") === "预演导入"
   );
   check("导入表单有确认按钮", !!submitBtn);
   submitBtn?.props?.onClick?.();
   await new Promise((r) => setImmediate(r));
-  check("空路径不发 import 请求", calls.filter((c) => c.endpoint === "import").length === before);
+  check("未选择文件不发 import 请求", calls.filter((c) => c.endpoint === "import").length === before);
   t = rerender(registered.Component, props);
   check(
-    "空路径给出提示",
-    flat(t).filter((x) => typeof x === "string").some((s) => s.includes("请填写要导入"))
+    "未选择文件给出提示",
+    flat(t).filter((x) => typeof x === "string").some((s) => s.includes("请选择要导入的 JSON 文件"))
   );
 
-  // 填路径后提交
-  pathInput?.props?.onChange?.({ target: { value: "C:\\tmp\\snippets.json" } });
+  const oversizedFile = { name: "too-large.json", size: 8_000_001, text: async () => "{}" };
+  await fileInput?.props?.onChange?.({ target: { files: [oversizedFile], value: "too-large.json" } });
+  t = rerender(registered.Component, props);
+  check("超出 8 MB 的文件在读取前被拒绝", flat(t).some((value) => typeof value === "string" && value.includes("文件超过 8 MB"))
+    && calls.filter((call) => call.endpoint === "import").length === before);
+
+  const unreadableFile = { name: "unreadable.json", size: 10, text: async () => { throw new Error("read denied"); } };
+  await fileInput?.props?.onChange?.({ target: { files: [unreadableFile], value: "unreadable.json" } });
+  t = rerender(registered.Component, props);
+  check("所选文件读取失败时显示明确提示", flat(t).some((value) => typeof value === "string" && value.includes("读取所选文件失败：read denied")));
+
+  // 选择 JSON 文件后先预演，再确认提交
+  const selectedJson = JSON.stringify({ format: "dsh-prompt-snippets", snippets: [{ name: "导入项", content: "内容" }] });
+  const selectedFileTarget = { files: [{ name: "snippets.json", size: selectedJson.length, text: async () => selectedJson }], value: "snippets.json" };
+  await fileInput?.props?.onChange?.({ target: selectedFileTarget });
+  check("选中文件后立即清空 input value，允许再次选择同一文件", selectedFileTarget.value === "");
+  check("隐藏文件 input 不绑定不可触发的键盘事件", fileInput?.props?.style?.display === "none" && fileInput.props.onKeyDown === undefined);
   t = rerender(registered.Component, props);
   p = t.children.find((c) => c?.props?.id === "ps-panel");
   const checkbox = flat(p).find((n) => n?.props?.type === "checkbox");
   checkbox?.props?.onChange?.({ target: { checked: true } });
   t = rerender(registered.Component, props);
   p = t.children.find((c) => c?.props?.id === "ps-panel");
+  const previewBtn = flat(p).find(
+    (n) => n?.props?.className === "ps-primary" && Array.isArray(n.children) && n.children.join("") === "预演导入"
+  );
+  previewBtn?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  t = rerender(registered.Component, props);
+  p = t.children.find((c) => c?.props?.id === "ps-panel");
+  check("预演结果显示数量摘要", flat(p).some((n) => typeof n === "string" && n.includes("新增 2")));
+  const previewCall = calls.filter((c) => c.endpoint === "import").at(-1);
+  check("预演请求携带已选文件内容且不写入", previewCall?.payload?.dryRun === true && previewCall.payload.json === selectedJson);
+  const previewKeyEffect = effects.find((entry) => entry.fn.toString().includes("inPanel && importOpen"));
+  previewKeyEffect?.fn();
+  const previewKeyHandler = window._handlers.keydown;
+  let previewPrevented = 0;
+  let previewStopped = 0;
+  previewKeyHandler?.({
+    target: { closest: (selector) => selector === "#ps-panel" ? {} : null },
+    key: "Enter", ctrlKey: true, metaKey: false,
+    preventDefault() { previewPrevented++; },
+    stopPropagation() { previewStopped++; },
+  });
+  await new Promise((r) => setImmediate(r));
   const submit2 = flat(p).find(
-    (n) => n?.props?.className === "ps-primary" && Array.isArray(n.children) && n.children.join("") === "导入"
+    (n) => n?.props?.className === "ps-primary" && Array.isArray(n.children) && n.children.join("") === "确认导入"
   );
   submit2?.props?.onClick?.();
   await new Promise((r) => setImmediate(r));
   const impCall = calls.filter((c) => c.endpoint === "import").at(-1);
-  check("提交时调用 import 端点", !!impCall);
-  check("导入请求带 path", impCall?.payload?.path === "C:\\tmp\\snippets.json", JSON.stringify(impCall?.payload));
+  check("确认后调用 import 端点", !!impCall);
+  check("确认请求携带与预演相同的 JSON 文件内容", impCall?.payload?.json === selectedJson, JSON.stringify(impCall?.payload));
   check("导入请求带 replace 模式", impCall?.payload?.mode === "replace", JSON.stringify(impCall?.payload));
-
+  check("确认请求带预演文件指纹", impCall?.payload?.expectedSourceHash === "preview-hash");
+  check("确认请求带预演片段库指纹", impCall?.payload?.expectedStoreHash === "store-preview-hash");
+  check("导入 Ctrl+Enter 确认当前预演", previewPrevented === 1 && previewStopped === 1 && !!impCall);
   t = rerender(registered.Component, props);
   const texts = flat(t).filter((x) => typeof x === "string");
   check("导入成功后提示新增条数", texts.some((s) => s.includes("导入 2 条")), texts.join("|").slice(0, 200));
   const p3 = t.children.find((c) => c?.props?.id === "ps-panel");
-  check("导入成功后表单收起", !flat(p3).some((n) => n?.props?.placeholder?.includes("exports/snippets.json")));
+  check("导入成功后表单收起", !flat(p3).some((n) => n?.props?.type === "file"));
   check("导入成功后重新拉列表", calls.filter((c) => c.endpoint === "list").length > 0);
+}
+
+// —— 备份发现与恢复入口 ——
+{
+  let t = rerender(registered.Component, props);
+  if (!t.children.find((c) => c?.props?.id === "ps-panel")) {
+    t.children.find((c) => c?.props?.id === "ps-button")?.props?.onClick?.({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+    t = rerender(registered.Component, props);
+    await new Promise((r) => setImmediate(r));
+    t = rerender(registered.Component, props);
+  }
+  const p = t.children.find((c) => c?.props?.id === "ps-panel");
+  const backupToggle = flat(p).find((n) => n?.props?.className === "ps-ghost" && flat(n).includes("备份恢复"));
+  check("面板提供备份恢复入口", !!backupToggle);
+  backupToggle?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const next = rerender(registered.Component, props);
+  const backupRegion = flat(next).find((n) => n?.props?.role === "region" && n?.props?.["aria-label"] === "备份恢复");
+  check("备份入口显示可恢复备份", flat(backupRegion).some((n) => typeof n === "string" && n.includes("snippets.json.bak")));
+  const chooseBackup = flat(backupRegion).find((n) => n?.props?.onClick && Array.isArray(n.children) && n.children.includes("恢复"));
+  check("备份恢复提供选择入口", !!chooseBackup);
+  chooseBackup?.props?.onClick?.();
+  const confirmRegion = flat(rerender(registered.Component, props)).find((n) => n?.props?.role === "region" && n?.props?.["aria-label"] === "备份恢复");
+  check("备份恢复要求二次确认", flat(confirmRegion).some((n) => typeof n === "string" && n.includes("确认恢复此备份")));
+  let restoreOptionFocusCount = 0;
+  const cancelRestore = flat(confirmRegion).find((n) => n?.props?.onClick && Array.isArray(n.children) && n.children.includes("取消恢复"));
+  chooseBackup?.props?.ref?.({ focus() { restoreOptionFocusCount++; } });
+  cancelRestore?.props?.onClick?.();
+  const cancelFocusEffect = effects.find((entry) => entry.fn.toString().includes("backupRestoreRefs.current[name]"));
+  cancelFocusEffect?.fn();
+  await new Promise((r) => setImmediate(r));
+  check("取消二次确认后焦点回到对应备份", restoreOptionFocusCount === 1);
+  const cancelledRegion = flat(rerender(registered.Component, props)).find((n) => n?.props?.role === "region" && n?.props?.["aria-label"] === "备份恢复");
+  const selectedRestore = flat(cancelledRegion).find((n) => n?.props?.onClick && Array.isArray(n.children) && n.children.includes("恢复"));
+  check("取消恢复仍保留备份列表", !!selectedRestore);
+  selectedRestore?.props?.onClick?.();
+  const reConfirmRegion = flat(rerender(registered.Component, props)).find((n) => n?.props?.role === "region" && n?.props?.["aria-label"] === "备份恢复");
+  const confirmBackup = flat(reConfirmRegion).find((n) => n?.props?.className === "ps-primary" && n?.props?.onClick);
+  let restoreFocusCount = 0;
+  check("备份恢复确认按钮存在", !!confirmBackup && !!confirmBackup.props.ref);
+  if (confirmBackup?.props?.ref) confirmBackup.props.ref.current = { focus() { restoreFocusCount++; } };
+  const confirmFocusEffect = effects.find((entry) => entry.fn.toString().includes("backupConfirmRef.current"));
+  confirmFocusEffect?.fn();
+  await new Promise((r) => setImmediate(r));
+  check("备份确认层自动聚焦确认按钮", restoreFocusCount === 1);
+
+  const realCall = fakeRpc.call;
+  fakeRpc.call = (channel, endpoint, payload) => {
+    if (endpoint === "restore-backup") {
+      calls.push({ channel, endpoint, payload });
+      return Promise.resolve({ ok: false, error: { code: "conflict", message: "备份内容已发生变化，请刷新备份列表并重新选择" } });
+    }
+    if (endpoint === "backups") {
+      calls.push({ channel, endpoint, payload });
+      return Promise.resolve({ ok: true, value: { backups: [{ name: "snippets.json.bak", size: 128, modifiedAt: 1_800_000_000_001, sourceHash: "b".repeat(64) }] } });
+    }
+    return realCall(channel, endpoint, payload);
+  };
+  const beforeRefresh = calls.filter((call) => call.endpoint === "backups").length;
+  confirmBackup?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const staleRequest = calls.filter((call) => call.endpoint === "restore-backup").at(-1);
+  check("恢复请求带有选中备份的指纹", staleRequest?.payload?.name === "snippets.json.bak" && staleRequest?.payload?.expectedSourceHash === "a".repeat(64));
+  const conflictTree = rerender(registered.Component, props);
+  const refreshedRegion = flat(conflictTree).find((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复");
+  check("备份变化后刷新列表并清除过期确认", !!refreshedRegion && !flat(refreshedRegion).some((node) => node?.props?.role === "alertdialog")
+    && calls.filter((call) => call.endpoint === "backups").length === beforeRefresh + 1);
+  check("备份变化后提示重新选择", flat(conflictTree).some((node) => typeof node === "string" && node.includes("备份内容已发生变化")));
+  fakeRpc.call = realCall;
+  flat(refreshedRegion).find((node) => node?.type === "button" && node.children?.includes("恢复"))?.props?.onClick?.();
+  const refreshedConfirm = flat(rerender(registered.Component, props)).find((node) => node?.props?.role === "alertdialog");
+  flat(refreshedConfirm).find((node) => node?.props?.className === "ps-primary")?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const freshRequest = calls.filter((call) => call.endpoint === "restore-backup").at(-1);
+  check("重新选择后发送刷新得到的备份指纹", freshRequest?.payload?.expectedSourceHash === "b".repeat(64));
+  check("恢复成功后关闭备份区域", !flat(rerender(registered.Component, props)).some((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复"));
 }
 
 // —— §3.3 导入失败降级 ——
@@ -927,27 +1153,36 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   const realCall = fakeRpc.call;
   fakeRpc.call = (channel, endpoint, payload) =>
     endpoint === "import"
-      ? Promise.resolve({ ok: false, error: { code: "bad-request", message: "读不到导入文件「x.json」：ENOENT" } })
+      ? Promise.resolve({ ok: false, error: { code: "bad-request", message: "导入文件不是合法 JSON" } })
       : realCall(channel, endpoint, payload);
   let t = rerender(registered.Component, props);
+  if (!t.children.find((c) => c?.props?.id === "ps-panel")) {
+    t.children.find((c) => c?.props?.id === "ps-button")?.props?.onClick?.({ currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) } });
+    t = rerender(registered.Component, props);
+    await new Promise((r) => setImmediate(r));
+    t = rerender(registered.Component, props);
+  }
   let p = t.children.find((c) => c?.props?.id === "ps-panel");
   const toggle = flat(p).find((n) => n?.props?.className === "ps-ghost" && flat(n).includes("⬆ 导入"));
   toggle?.props?.onClick?.();
   t = rerender(registered.Component, props);
   p = t.children.find((c) => c?.props?.id === "ps-panel");
-  flat(p).find((n) => n?.props?.placeholder?.includes("exports/snippets.json"))?.props?.onChange?.({
-    target: { value: "x.json" },
-  });
+  const failFileInput = flat(p).find((n) => n?.props?.type === "file");
+  await failFileInput?.props?.onChange?.({ target: { files: [{ name: "x.json", size: 12, text: async () => "{}" }], value: "x.json" } });
   t = rerender(registered.Component, props);
   p = t.children.find((c) => c?.props?.id === "ps-panel");
   flat(p)
-    .find((n) => n?.props?.className === "ps-primary" && Array.isArray(n.children) && n.children.join("") === "导入")
+    .find((n) => n?.props?.className === "ps-primary" && Array.isArray(n.children) && n.children.join("") === "预演导入")
     ?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  t = rerender(registered.Component, props);
+  const confirmImportBtn = flat(t).find((n) => n?.props?.className === "ps-primary" && Array.isArray(n.children) && n.children.join("") === "确认导入");
+  confirmImportBtn?.props?.onClick?.();
   await new Promise((r) => setImmediate(r));
   t = rerender(registered.Component, props);
   check(
     "导入失败显示错误文案",
-    flat(t).filter((x) => typeof x === "string").some((s) => s.includes("读不到导入文件"))
+    flat(t).filter((x) => typeof x === "string").some((s) => s.includes("导入文件不是合法 JSON"))
   );
   fakeRpc.call = realCall;
 }
@@ -1613,6 +1848,155 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   window.removeEventListener = realWindowRem;
   x = rerender(registered.Component, props);
   fakeRpc.call = realCall;
+}
+
+// 按依赖提交 memo/effect，避免每次渲染都重建监听器而掩盖闭包过期问题。
+{
+  const previousSlots = slots;
+  const previousEffects = effects;
+  const realCall = fakeRpc.call;
+  const realAdd = window.addEventListener;
+  const realRemove = window.removeEventListener;
+  const keyHandlers = new Set();
+  const keyboardCalls = [];
+  const pendingImports = [];
+  const importCalls = () => keyboardCalls.filter((call) => call.endpoint === "import");
+  let view;
+  slots = [];
+  trackDependencies = true;
+  window.addEventListener = (type, handler) => { if (type === "keydown") keyHandlers.add(handler); };
+  window.removeEventListener = (type, handler) => { if (type === "keydown") keyHandlers.delete(handler); };
+  fakeRpc.call = (channel, endpoint, payload) => {
+    keyboardCalls.push({ channel, endpoint, payload });
+    if (endpoint === "list") return Promise.resolve({ ok: true, value: { version: 4, snippets: DATA } });
+    if (endpoint === "import") return new Promise((resolve) => pendingImports.push({ payload, resolve }));
+    return Promise.resolve({ ok: true, value: {} });
+  };
+  const commit = () => {
+    view = rerender(registered.Component, props);
+    for (const { i, fn, deps } of effects) {
+      slots[i]?.dispose?.();
+      slots[i] = { deps, dispose: fn() };
+    }
+    return view;
+  };
+  const settle = async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+    return commit();
+  };
+  const finishImport = async () => {
+    const pending = pendingImports.shift();
+    if (!pending) throw new Error("没有等待中的导入请求");
+    pending.resolve({ ok: true, value: {
+      plan: { added: 1, updated: 0, skipped: 0, deleted: 0, dropped: 0, conflicts: [] },
+      sourceHash: "source-preview-hash", storeHash: "store-preview-hash",
+    } });
+    return settle();
+  };
+  const buttonByText = (text) => flat(view).find((node) => node?.type === "button" && node.children?.includes(text));
+  const fileField = () => flat(view).find((node) => node?.props?.type === "file");
+  const chooseFile = async (name, json) => {
+    const bytes = json.length;
+    await fileField().props.onChange({ target: { files: [{ name, size: bytes, text: async () => json }], value: name } });
+    return commit();
+  };
+  const selectedJson = JSON.stringify({ format: "dsh-prompt-snippets", snippets: [{ name: "快捷导入", content: "快捷内容" }] });
+  const helpDialog = () => flat(view).find((node) => node?.props?.role === "dialog" && node?.props?.["aria-label"] === "快捷键与键盘操作");
+  const openHelp = () => {
+    flat(view).find((node) => node?.props?.["aria-label"] === "快捷键帮助").props.onClick();
+    commit();
+  };
+  const press = (key, modifiers = {}) => {
+    const event = {
+      target: { closest: (selector) => selector === "#ps-panel" ? {} : null },
+      key, ctrlKey: false, metaKey: false, ...modifiers,
+      defaultPrevented: false, propagationStopped: false,
+      preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.propagationStopped = true; },
+    };
+    for (const handler of [...keyHandlers]) handler(event);
+    return event;
+  };
+  try {
+    commit();
+    await settle();
+    view.children.find((node) => node?.props?.id === "ps-button").props.onClick({
+      currentTarget: { getBoundingClientRect: () => ({ left: 100, top: 800, right: 200, bottom: 830 }) },
+    });
+    commit();
+    await settle();
+    buttonByText("⬆ 导入").props.onClick();
+    commit();
+    await chooseFile("snippets.json", selectedJson);
+    press("Enter", { ctrlKey: true });
+    check("依赖稳定时快捷键用已选文件内容预演", importCalls().length === 1 && importCalls()[0].payload.json === selectedJson && importCalls()[0].payload.dryRun === true);
+    commit();
+    press("Enter", { ctrlKey: true });
+    check("预演处理中重复快捷键不会重复发请求", importCalls().length === 1);
+    await finishImport();
+
+    openHelp();
+    const beforeHelpImport = importCalls().length;
+    for (const modifiers of [{ ctrlKey: true }, { metaKey: true }]) {
+      const event = press("Enter", modifiers);
+      check("帮助弹窗拦截导入确认快捷键", event.defaultPrevented && event.propagationStopped && importCalls().length === beforeHelpImport && !!helpDialog());
+    }
+    const enter = press("Enter");
+    const space = press(" ");
+    check("帮助关闭按钮保留普通 Enter 和空格操作", !enter.defaultPrevented && !enter.propagationStopped && !space.defaultPrevented && !space.propagationStopped);
+    press("Escape");
+    commit();
+    check("帮助弹窗 Esc 只关闭帮助并保留导入预演", !helpDialog() && !!fileField() && !!buttonByText("确认导入"));
+    press("Enter", { ctrlKey: true });
+    check("关闭帮助后快捷键可确认原有导入预演", importCalls().length === beforeHelpImport + 1 && importCalls().at(-1).payload.dryRun === undefined);
+    commit();
+    press("Enter", { metaKey: true });
+    check("确认导入处理中重复快捷键不会再次提交", importCalls().length === beforeHelpImport + 1);
+    await finishImport();
+
+    buttonByText("⬆ 导入").props.onClick();
+    commit();
+    await chooseFile("replacement.json", selectedJson);
+    flat(view).find((node) => node?.props?.type === "checkbox").props.onChange({ target: { checked: true } });
+    commit();
+    const beforeModePreview = importCalls().length;
+    press("Enter", { metaKey: true });
+    check("仅改变导入模式时快捷键读取最新替换选项", importCalls().length === beforeModePreview + 1
+      && importCalls().at(-1).payload.json === selectedJson && importCalls().at(-1).payload.mode === "replace");
+    await finishImport();
+    press("Escape");
+    commit();
+
+    findRowBtn(view, "代码审查").props.onClick();
+    commit();
+    const form = flat(view).find((node) => node?.props?.id === "ps-fill-form");
+    flat(form).find((node) => node?.props?.onChange && (node.type === "input" || node.type === "textarea")).props.onChange({ target: { value: "待审查代码" } });
+    commit();
+    check("帮助隔离测试的占位符必填项已齐全", buttonByText("插入")?.props?.disabled === false);
+    const beforeHelpInsert = inserted.length;
+    const beforeHelpSubmit = submitted;
+    openHelp();
+    for (const modifiers of [{ ctrlKey: true }, { metaKey: true }]) {
+      const event = press("Enter", modifiers);
+      check("帮助弹窗拦截占位符插入并发送快捷键", event.defaultPrevented && event.propagationStopped
+        && inserted.length === beforeHelpInsert && submitted === beforeHelpSubmit && !!helpDialog());
+    }
+    press("Escape");
+    commit();
+    check("关闭帮助仍保留已填写的占位符表单", !helpDialog() && flat(view).some((node) => node?.props?.id === "ps-fill-form")
+      && flat(view).some((node) => node?.props?.value === "待审查代码"));
+    press("Enter", { ctrlKey: true });
+    check("关闭帮助后占位符快捷键正常插入并发送", inserted.length === beforeHelpInsert + 1 && submitted === beforeHelpSubmit + 1
+      && inserted.at(-1) === "请审查这段代码 待审查代码");
+  } finally {
+    for (const slot of slots) slot?.dispose?.();
+    slots = previousSlots;
+    effects = previousEffects;
+    trackDependencies = false;
+    fakeRpc.call = realCall;
+    window.addEventListener = realAdd;
+    window.removeEventListener = realRemove;
+  }
 }
 
 console.log(results.join("\n"));

@@ -4,6 +4,7 @@ import { TEST_HOME } from "./isolate-home.mjs"; // 必须先顶 DSH_HOME 再 imp
 import { apply } from "../index.js";
 import { readFile, writeFile, readdir, mkdir, stat, copyFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 const results = [];
 let group = "";
@@ -316,6 +317,78 @@ await reset({ version: 4, snippets: [] });
   check(".bak 内容是上一次成功写入的完整 JSON", bak === first, `bak=${bak.length} first=${first.length}`);
   const bakParsed = JSON.parse(bak);
   check(".bak 可解析且只含第一", bakParsed.snippets.length === 1 && bakParsed.snippets[0].name === "第一");
+  const backups = await call("backups", {});
+  check("备份列表端点发现轮换备份", backups.ok && backups.value.backups.some((item) => item.name === "snippets.json.bak"));
+  const selectedBackup = backups.value.backups.find((item) => item.name === "snippets.json.bak");
+  check("备份列表带有对应内容的 SHA-256 指纹", selectedBackup.sourceHash === createHash("sha256").update(bak, "utf8").digest("hex"));
+  const beforeRestore = await readFile(FILE, "utf8");
+  const missingHash = await call("restore-backup", { name: selectedBackup.name });
+  const invalidHash = await call("restore-backup", { name: selectedBackup.name, expectedSourceHash: "invalid" });
+  check("恢复备份必须携带有效指纹", !missingHash.ok && missingHash.error.code === "bad-request" && !invalidHash.ok && invalidHash.error.code === "bad-request");
+  check("指纹缺失或不合法时不修改当前库和备份", await readFile(FILE, "utf8") === beforeRestore && await readFile(BAK, "utf8") === bak);
+  const restored = await call("restore-backup", { name: selectedBackup.name, expectedSourceHash: selectedBackup.sourceHash });
+  check("恢复备份成功并返回恢复来源", restored.ok && restored.value.restoredBackup === "snippets.json.bak", restored.error?.message);
+  check("恢复后数据来自备份", (await read()).snippets.map((s) => s.name).join(",") === "第一");
+  check("恢复前当前库已进入轮换备份", await readFile(BAK, "utf8") === beforeRestore);
+  const restoredSnippet = (await read()).snippets[0];
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  let pendingTouchCallback = null;
+  globalThis.setTimeout = (fn) => {
+    pendingTouchCallback = fn;
+    return { unref() {} };
+  };
+  globalThis.clearTimeout = () => {};
+  await call("touch", { ids: [restoredSnippet.id] });
+  globalThis.setTimeout = realSetTimeout;
+  globalThis.clearTimeout = realClearTimeout;
+  const nextBackup = (await call("backups", {})).value.backups.find((item) => item.name === "snippets.json.bak");
+  const restoredAgain = await call("restore-backup", { name: nextBackup.name, expectedSourceHash: nextBackup.sourceHash });
+  pendingTouchCallback?.();
+  await new Promise((resolve) => realSetTimeout(resolve, 20));
+  const afterPendingTouchRestore = (await read()).snippets[0];
+  check("恢复备份丢弃尚未落盘的旧库使用计数", restoredAgain.ok && afterPendingTouchRestore.useCount === restoredSnippet.useCount);
+  await writeFile(join(DIR, "snippets.json.bak.2"), JSON.stringify({
+    version: 1,
+    snippets: [{ name: "旧格式恢复", content: "迁移后恢复" }],
+  }), "utf8");
+  const legacyBackup = (await call("backups", {})).value.backups.find((item) => item.name === "snippets.json.bak.2");
+  const legacyRestore = await call("restore-backup", { name: legacyBackup.name, expectedSourceHash: legacyBackup.sourceHash });
+  check("旧格式备份恢复时迁移到当前版本", legacyRestore.ok && (await read()).version === 4, legacyRestore.error?.message);
+  check("旧格式备份内容恢复", (await read()).snippets[0]?.name === "旧格式恢复");
+  const beforeBadRestore = await readFile(FILE, "utf8");
+  await writeFile(join(DIR, "snippets.json.bak.3"), "{invalid", "utf8");
+  const invalidBackup = await call("restore-backup", { name: "snippets.json.bak.3", expectedSourceHash: createHash("sha256").update("{invalid").digest("hex") });
+  check("损坏备份被排除在可恢复列表之外", !(await call("backups", {})).value.backups.some((item) => item.name === "snippets.json.bak.3"));
+  check("拒绝恢复损坏备份", invalidBackup.ok === false && invalidBackup.error.code === "bad-request");
+  check("损坏备份恢复失败时当前库保持不变", await readFile(FILE, "utf8") === beforeBadRestore);
+  await writeFile(join(DIR, "snippets.json.bak.4"), " ".repeat(8_000_001), "utf8");
+  const backupsWithOversized = await call("backups", {});
+  check("超大备份不会进入可恢复列表", !backupsWithOversized.value.backups.some((item) => item.name === "snippets.json.bak.4"));
+  const oversizedRestore = await call("restore-backup", { name: "snippets.json.bak.4", expectedSourceHash: selectedBackup.sourceHash });
+  check("超大备份在读取前被拒绝", oversizedRestore.ok === false && oversizedRestore.error.code === "bad-request" && oversizedRestore.error.message.includes("过大"));
+  const unsafeRestore = await call("restore-backup", { name: "..\\outside.json" });
+  check("拒绝越界备份名", unsafeRestore.ok === false && unsafeRestore.error.code === "bad-request");
+}
+
+// 选中到确认之间发生轮换时，不能把同名文件中的另一份快照恢复进去。
+await reset({ version: 4, snippets: [] });
+{
+  await call("save", { name: "第一", content: "c1" });
+  await call("save", { name: "第二", content: "c2" });
+  const selectedBackup = (await call("backups", {})).value.backups.find((item) => item.name === "snippets.json.bak");
+  await call("save", { name: "第三", content: "c3" });
+  const currentRaw = await readFile(FILE, "utf8");
+  const currentBackup = await readFile(BAK, "utf8");
+  const staleRestore = await call("restore-backup", { name: selectedBackup.name, expectedSourceHash: selectedBackup.sourceHash });
+  check("选中后发生备份轮换时拒绝恢复另一份快照", !staleRestore.ok && staleRestore.error.code === "conflict");
+  check("备份指纹冲突时当前库和备份均不改写", await readFile(FILE, "utf8") === currentRaw && await readFile(BAK, "utf8") === currentBackup);
+  const missingBackup = await call("restore-backup", { name: "snippets.json.bak.7", expectedSourceHash: selectedBackup.sourceHash });
+  check("已消失的备份要求刷新并重新选择", !missingBackup.ok && missingBackup.error.code === "conflict");
+  const refreshedBackup = (await call("backups", {})).value.backups.find((item) => item.name === selectedBackup.name);
+  check("刷新后的备份指纹反映轮换后的内容", refreshedBackup.sourceHash !== selectedBackup.sourceHash);
+  const freshRestore = await call("restore-backup", { name: refreshedBackup.name, expectedSourceHash: refreshedBackup.sourceHash });
+  check("重新选择后可恢复当前备份快照", freshRestore.ok && (await read()).snippets.map((item) => item.name).join(",") === "第一,第二");
 }
 
 // 3.4 无临时文件残留
@@ -586,6 +659,34 @@ await reset({ version: 4, snippets: [] });
   const one = (await call("list", {})).value.snippets.find((s) => s.name === "导出乙");
   const ex1 = await call("export", { ids: [one.id] });
   check("按 ids 导出只含 1 条", ex1.value.count === 1, String(ex1.value.count));
+
+  const exportsDir = join(DIR, "exports");
+  await mkdir(exportsDir, { recursive: true });
+  const allFile = join(exportsDir, "snippets.json");
+  const filteredFile = join(exportsDir, "snippets-filtered.json");
+  await writeFile(allFile, "keep full export", "utf8");
+  await writeFile(filteredFile, "keep filtered export", "utf8");
+  const failedFilteredWrite = await call("export", { ids: ["missing-id"], write: "" });
+  check("空子集失败时不改写任何导出文件", failedFilteredWrite.ok === false && await readFile(allFile, "utf8") === "keep full export" && await readFile(filteredFile, "utf8") === "keep filtered export");
+  const fullWrite = await call("export", { write: "" });
+  check("空文件名全量导出使用 snippets.json", fullWrite.ok === true && fullWrite.value.path === allFile, fullWrite.value?.path);
+  const fullContents = await readFile(allFile, "utf8");
+  const filteredWrite = await call("export", { ids: [one.id], write: "" });
+  check("空文件名筛选导出使用独立文件", filteredWrite.ok === true && filteredWrite.value.path === filteredFile, filteredWrite.value?.path);
+  check("筛选导出没有覆盖全量备份", await readFile(allFile, "utf8") === fullContents);
+  for (const [label, payload] of [
+    ["null", { ids: null }],
+    ["非数组", { ids: "bad-id" }],
+    ["空数组", { ids: [] }],
+    ["空白 ID", { ids: ["  "] }],
+    ["混合类型", { ids: [one.id, 1] }],
+  ]) {
+    const invalid = await call("export", payload);
+    check(`筛选导出拒绝${label}`, invalid.ok === false && invalid.error.code === "bad-request", JSON.stringify(invalid.error));
+  }
+  const missingIds = await call("export", { ids: ["missing-id"], write: "" });
+  check("无匹配片段时拒绝筛选导出", missingIds.ok === false && missingIds.error.message.includes("没有可导出的匹配片段"), JSON.stringify(missingIds.error));
+  check("无匹配子集仍不覆盖已有文件", await readFile(allFile, "utf8") === fullContents && JSON.parse(await readFile(filteredFile, "utf8")).snippets.length === 1);
 
   // dryRun 导入
   await reset({ version: 4, snippets: [] });
