@@ -191,6 +191,15 @@ window.__ModuleLoader__.load({
       "panel.backupConfirmBtn": "确认恢复",
       "panel.backupCancel": "取消恢复",
       "notice.backupRestored": "已从 {name} 恢复片段库",
+      "panel.builtinRestore": "恢复内置模板",
+      "panel.builtinRestoreHint": "只补回缺失的内置模板；已修改的模板会保留原样，同名自建片段会跳过。",
+      "panel.builtinPreview": "预演恢复",
+      "panel.builtinConfirm": "确认恢复内置模板",
+      "panel.builtinLoading": "恢复中…",
+      "panel.builtinReadonly": "片段库处于只读状态，当前只能查看预演结果，不能恢复。",
+      "panel.builtinPlan": "将新增 {added} 条 · 恢复 {restored} 条 · 识别旧模板 {adopted} 条 · 已存在 {present} 条 · 冲突跳过 {conflicts} 条",
+      "panel.builtinConflicts": "同名或标识冲突：{names}",
+      "notice.builtinRestored": "内置模板恢复完成：新增 {added} 条，恢复 {restored} 条，识别旧模板 {adopted} 条",
       "panel.openFile": "打开",
       "panel.openFileTitle": "在系统文件管理器中打开这个文件",
       "panel.undoAll": "全部撤销",
@@ -378,6 +387,15 @@ window.__ModuleLoader__.load({
       "panel.backupConfirmBtn": "Confirm restore",
       "panel.backupCancel": "Cancel restore",
       "notice.backupRestored": "Library restored from {name}",
+      "panel.builtinRestore": "Restore built-in templates",
+      "panel.builtinRestoreHint": "Only missing built-in templates are added. Edited templates are preserved, and custom snippets with matching names are skipped.",
+      "panel.builtinPreview": "Preview restore",
+      "panel.builtinConfirm": "Confirm built-in restore",
+      "panel.builtinLoading": "Restoring…",
+      "panel.builtinReadonly": "The library is read-only. You can review this preview, but cannot restore templates.",
+      "panel.builtinPlan": "{added} to add · {restored} to restore · {adopted} legacy templates recognized · {present} already present · {conflicts} conflicts skipped",
+      "panel.builtinConflicts": "Name or identity conflicts: {names}",
+      "notice.builtinRestored": "Built-in templates restored: {added} added, {restored} restored, {adopted} legacy templates recognized",
       "panel.openFile": "Open",
       "panel.openFileTitle": "Open this file in the system file manager",
       "panel.undoAll": "Undo all",
@@ -1387,6 +1405,8 @@ window.__ModuleLoader__.load({
       const [backups, setBackups] = useState([]);
       const [backupsLoading, setBackupsLoading] = useState(false);
       const [restoringBackup, setRestoringBackup] = useState(null);
+      const [builtinPreview, setBuiltinPreview] = useState(null);
+      const [builtinLoading, setBuiltinLoading] = useState(false);
       const [deleted, setDeleted] = useState([]); // 最近 5 条 [{id,name}]，可逐条或全部撤销
       const [query, setQuery] = useState("");
       const [selected, setSelected] = useState(-1); // §3.2 键盘 ↑↓ 导航：visible 扁平数组的下标，-1 = 未选中
@@ -1415,6 +1435,8 @@ window.__ModuleLoader__.load({
       const backupToggleRef = useRef(null);
       const backupRestoreRefs = useRef(Object.create(null));
       const backupConfirmRef = useRef(null);
+      const builtinPreviewButtonRef = useRef(null);
+      const builtinConfirmRef = useRef(null);
       const nameRef = useRef(null);
       const editorFocusTokenRef = useRef(0);
       const editingRef = useRef(null);
@@ -1569,7 +1591,10 @@ window.__ModuleLoader__.load({
           setImportPreview(null);
           setTimeout(() => importToggleRef.current?.focus?.(), 0);
         } else if (backupOpen) {
-          if (restoringBackup) {
+          if (builtinPreview) {
+            setBuiltinPreview(null);
+            setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+          } else if (restoringBackup) {
             const name = restoringBackup.name;
             setRestoringBackup(null);
             setTimeout(() => backupRestoreRefs.current[name]?.focus?.(), 0);
@@ -1641,6 +1666,14 @@ window.__ModuleLoader__.load({
             else previewImport();
             return;
           }
+          if (inPanel && backupOpen && e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (builtinPreview) confirmBuiltinRestore();
+            else if (restoringBackup) restoreSelectedBackup();
+            else previewBuiltinRestore();
+            return;
+          }
 
           if ((inPanel || open) && e.key === "Escape") {
             e.preventDefault();
@@ -1675,7 +1708,7 @@ window.__ModuleLoader__.load({
           window.removeEventListener("keydown", onKey, true);
           document.removeEventListener("focusin", rememberComposer, true);
         };
-      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, selectedImport, importReplace, importing, importPreview, backupOpen, restoringBackup, review, filling, editing, history, query, helpOpen]);
+      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, selectedImport, importReplace, importing, importPreview, backupOpen, restoringBackup, builtinPreview, builtinLoading, review, filling, editing, history, query, helpOpen]);
 
       useEffect(() => {
         if (helpOpen) setTimeout(() => helpCloseRef.current?.focus?.(), 0);
@@ -1688,6 +1721,10 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (restoringBackup) setTimeout(() => backupConfirmRef.current?.focus?.(), 0);
       }, [restoringBackup]);
+
+      useEffect(() => {
+        if (builtinPreview) setTimeout(() => builtinConfirmRef.current?.focus?.(), 0);
+      }, [builtinPreview]);
 
       // §3.1：启动时问一次模型可用性。拿不到就不降级为「假装可用」——
       // 保持预置的可用状态，让点击时的错误提示兜底（老 host 没有这个字段）。
@@ -2028,6 +2065,7 @@ window.__ModuleLoader__.load({
         setImportPreview(null);
         setBackupOpen(false);
         setRestoringBackup(null);
+        setBuiltinPreview(null);
       };
 
       const beginEdit = (snippet) => {
@@ -2680,6 +2718,54 @@ window.__ModuleLoader__.load({
           })
           .catch((err) => {
             setBackupsLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const previewBuiltinRestore = () => {
+        if (builtinLoading) return;
+        setRestoringBackup(null);
+        setBuiltinLoading(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "builtin-restore", { dryRun: true }))
+          .then((result) => {
+            setBuiltinLoading(false);
+            if (result?.ok) setBuiltinPreview({ plan: result.value.plan, storeHash: result.value.storeHash, readOnly: result.value.readOnly === true });
+            else setError(result?.error?.message || t("error.readFailed"));
+          })
+          .catch((err) => {
+            setBuiltinLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const confirmBuiltinRestore = () => {
+        if (builtinLoading || !builtinPreview || builtinPreview.readOnly || readOnly) return;
+        setBuiltinLoading(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "builtin-restore", { expectedStoreHash: builtinPreview.storeHash }))
+          .then((result) => {
+            setBuiltinLoading(false);
+            if (result?.ok) {
+              applyResult(result);
+              setNotice(t("notice.builtinRestored", {
+                added: result.value.plan.added,
+                restored: result.value.plan.restored,
+                adopted: result.value.plan.adopted,
+              }));
+              setBuiltinPreview(null);
+              setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+              load();
+            } else {
+              if (result?.error?.code === "conflict") {
+                setBuiltinPreview(null);
+                setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+              }
+              setError(result?.error?.message || t("error.saveFailed"));
+            }
+          })
+          .catch((err) => {
+            setBuiltinLoading(false);
             setError(String((err && err.message) || err));
           });
       };
@@ -3787,12 +3873,14 @@ window.__ModuleLoader__.load({
                       className: "ps-ghost",
                       style: importOpen ? { ...style.btnGhost, ...style.itemEditing } : style.btnGhost,
                       onClick: () => {
-                        setImportOpen((prev) => !prev);
+                        const next = !importOpen;
+                        setImportOpen(next);
                         setImportPreview(null);
-                        if (!importOpen) {
+                        if (next) {
                           setHistory(null);
                           setBackupOpen(false);
                           setRestoringBackup(null);
+                          setBuiltinPreview(null);
                         }
                         setError(null);
                       },
@@ -3812,6 +3900,7 @@ window.__ModuleLoader__.load({
                         const next = !backupOpen;
                         setBackupOpen(next);
                         setRestoringBackup(null);
+                        setBuiltinPreview(null);
                         if (next) {
                           setHistory(null);
                           setImportOpen(false);
@@ -3955,7 +4044,10 @@ window.__ModuleLoader__.load({
                           if (el) backupRestoreRefs.current[backup.name] = el;
                           else delete backupRestoreRefs.current[backup.name];
                         },
-                        onClick: () => setRestoringBackup(backup),
+                        onClick: () => {
+                          setBuiltinPreview(null);
+                          setRestoringBackup(backup);
+                        },
                       }, t("panel.backupRestore")),
                     )),
                 restoringBackup
@@ -3985,6 +4077,49 @@ window.__ModuleLoader__.load({
                     ),
                   )
                   : null,
+                h("div", { style: style.editor },
+                  h("div", { style: style.label }, t("panel.builtinRestore")),
+                  h("div", { style: style.hintMuted }, t("panel.builtinRestoreHint")),
+                  h("div", { style: style.actions },
+                    builtinPreview
+                      ? h("button", {
+                        type: "button",
+                        className: "ps-ghost",
+                        style: style.btnGhost,
+                        disabled: builtinLoading,
+                        onClick: () => {
+                          setBuiltinPreview(null);
+                          setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+                        },
+                      }, t("panel.backupCancel"))
+                      : null,
+                    h("button", {
+                      type: "button",
+                      className: builtinPreview ? "ps-primary" : "ps-ghost",
+                      style: builtinLoading ? { ...style.btnGhost, ...style.btnDisabled } : builtinPreview ? style.btnPrimary : style.btnGhost,
+                      disabled: builtinLoading || (builtinPreview ? builtinPreview.readOnly : false),
+                      ref: builtinPreview ? builtinConfirmRef : builtinPreviewButtonRef,
+                      onClick: builtinPreview ? confirmBuiltinRestore : previewBuiltinRestore,
+                    }, builtinLoading ? t("panel.builtinLoading") : builtinPreview ? t("panel.builtinConfirm") : t("panel.builtinPreview")),
+                  ),
+                  builtinPreview
+                    ? h("div", { style: style.hintMuted, role: "status" },
+                      t("panel.builtinPlan", {
+                        added: builtinPreview.plan.added,
+                        restored: builtinPreview.plan.restored,
+                        adopted: builtinPreview.plan.adopted,
+                        present: builtinPreview.plan.present,
+                        conflicts: builtinPreview.plan.conflicts.length,
+                      }),
+                      builtinPreview.readOnly ? h("div", { style: style.hintMuted }, t("panel.builtinReadonly")) : null,
+                      builtinPreview.plan.conflicts.length
+                        ? h("div", { style: style.hintMuted }, t("panel.builtinConflicts", {
+                          names: builtinPreview.plan.conflicts.map((item) => item.name).join("、"),
+                        }))
+                        : null,
+                    )
+                    : null,
+                ),
               )
               : null,
             exportPath
