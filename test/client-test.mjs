@@ -336,6 +336,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
 // ══════════ §2.5 表单：必填禁用、填值后插入、保留占位符插入 ══════════
 {
   // 构造：必填变量 + 有默认值的非必填变量
+  delete localStorage._v["dsh-prompt-snippets-fill-memory"];
   const SAMPLE = {
     id: "req",
     name: "带必填",
@@ -457,9 +458,44 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   check("填写表单 Ctrl+Enter 插入渲染结果", inserted[0] === "请审查 这段代码，关注 正确性。", inserted[0]);
   check("填写表单 Ctrl+Enter 调用宿主发送", submitted === submitsBeforeBlockedShortcut + 1);
   check("填写表单 Ctrl+Enter 阻止宿主抢占", fillShortcutPrevented === 1 && fillShortcutStopped === 1);
+  check("填写记忆默认关闭且不会保存", flat(rerender(registered.Component, props)).some((node) => node?.props?.id === "ps-panel") === false
+    && localStorage.getItem("dsh-prompt-snippets-fill-memory") === null);
   readyFormKeyCleanup?.();
   window.addEventListener = realWindowAddForFill;
   check("插入后关闭面板", !panelOf(rerender(registered.Component, props)));
+
+  t = openPanel();
+  findBtnByText(t, "带必填").props.onClick();
+  t = rerender(registered.Component, props);
+  let memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  const rememberToggle = allNodes(memoryForm).find((node) => node?.props?.type === "checkbox");
+  check("记忆选项在表单中默认未勾选", rememberToggle?.props?.checked === false);
+  rememberToggle?.props?.onChange({ target: { checked: true } });
+  t = rerender(registered.Component, props);
+  memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  const rememberedInputs = allNodes(memoryForm).filter((node) => node?.props?.className === "ps-input" || node?.props?.className === "ps-textarea");
+  rememberedInputs[0]?.props?.onChange({ target: { value: "记住的代码" } });
+  t = rerender(registered.Component, props);
+  findBtnByText(t, "插入")?.props?.onClick();
+  const savedFillMemory = JSON.parse(localStorage.getItem("dsh-prompt-snippets-fill-memory") || "null");
+  check("开启后成功插入才保存本机记忆", savedFillMemory?.enabled === true && savedFillMemory.entries?.req?.values?.代码 === "记住的代码");
+
+  t = openPanel();
+  findBtnByText(t, "带必填").props.onClick();
+  t = rerender(registered.Component, props);
+  memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  check("记忆不会自动覆盖表单并提供手动填入按钮", !!findBtnByText(memoryForm, "填入上次值")
+    && allNodes(memoryForm).some((node) => node?.props?.className === "ps-textarea" && node?.props?.value === ""));
+  findBtnByText(memoryForm, "填入上次值")?.props?.onClick();
+  t = rerender(registered.Component, props);
+  memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  check("手动填入上次值保留有效填写内容", allNodes(memoryForm).some((node) => node?.props?.className === "ps-textarea" && node?.props?.value === "记住的代码"));
+  findBtnByText(memoryForm, "清除记忆")?.props?.onClick();
+  t = rerender(registered.Component, props);
+  memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  check("清除记忆不清空当前表单并删除本机记录", localStorage.getItem("dsh-prompt-snippets-fill-memory") === JSON.stringify({ version: 1, enabled: true, entries: {} })
+    && allNodes(memoryForm).some((node) => node?.props?.className === "ps-textarea" && node?.props?.value === "记住的代码"));
+  findBtnByText(memoryForm, "取消")?.props?.onClick();
 
   // 保留占位符插入
   inserted.length = 0;
@@ -1994,6 +2030,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
 
 // 按依赖提交 memo/effect，避免每次渲染都重建监听器而掩盖闭包过期问题。
 {
+  delete localStorage._v["dsh-prompt-snippets-fill-memory"];
   const previousSlots = slots;
   const previousEffects = effects;
   const realCall = fakeRpc.call;
@@ -2112,7 +2149,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
     findRowBtn(view, "代码审查").props.onClick();
     commit();
     const form = flat(view).find((node) => node?.props?.id === "ps-fill-form");
-    flat(form).find((node) => node?.props?.onChange && (node.type === "input" || node.type === "textarea")).props.onChange({ target: { value: "待审查代码" } });
+    flat(form).find((node) => node?.props?.onChange && (node.type === "textarea" || node.type === "input" && node.props.type !== "checkbox")).props.onChange({ target: { value: "待审查代码" } });
     commit();
     check("帮助隔离测试的占位符必填项已齐全", buttonByText("插入")?.props?.disabled === false);
     const beforeHelpInsert = inserted.length;

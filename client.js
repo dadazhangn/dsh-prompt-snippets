@@ -75,6 +75,12 @@ window.__ModuleLoader__.load({
       "fill.insert": "插入",
       "fill.title": "填写「{name}」的占位符",
       "fill.keyboardHint": "Tab / Shift+Tab 切换变量 · Ctrl+Enter 插入并发送 · Esc 取消",
+      "fill.remember": "启用本机填写记忆（成功插入后保存）",
+      "fill.applyMemory": "填入上次值",
+      "fill.clearMemory": "清除记忆",
+      "fill.memoryHint": "默认关闭；开启后仅在成功插入时更新，可手动填入或清除。",
+      "fill.memoryCleared": "已清除此片段的填写记忆。",
+      "fill.memoryLimit": "本次填写过长，未能保存到本机记忆。",
       "help.title": "快捷键与键盘操作",
       "help.open": "快捷键帮助",
       "help.close": "关闭快捷键帮助",
@@ -281,6 +287,12 @@ window.__ModuleLoader__.load({
       "fill.insert": "Insert",
       "fill.title": "Fill placeholders for \"{name}\"",
       "fill.keyboardHint": "Tab / Shift+Tab move between fields · Ctrl+Enter insert & send · Esc cancel",
+      "fill.remember": "Enable local fill memory (save after successful insert)",
+      "fill.applyMemory": "Fill last values",
+      "fill.clearMemory": "Clear memory",
+      "fill.memoryHint": "Off by default. When enabled, values update after a successful insert; you can fill or clear them manually.",
+      "fill.memoryCleared": "Remembered values for this snippet were cleared.",
+      "fill.memoryLimit": "These values were too large to save in local memory.",
       "help.title": "Keyboard shortcuts",
       "help.open": "Keyboard shortcuts",
       "help.close": "Close keyboard shortcuts",
@@ -457,6 +469,47 @@ window.__ModuleLoader__.load({
     const MIN_H = 160;
     const POS_KEY = "dsh-prompt-snippets-panel-pos";
     const SIZE_KEY = "dsh-prompt-snippets-panel-size";
+    const FILL_MEMORY_KEY = "dsh-prompt-snippets-fill-memory";
+    const FILL_MEMORY_MAX_BYTES = 64 * 1024;
+    const FILL_MEMORY_MAX_SNIPPETS = 50;
+
+    function readFillMemory() {
+      try {
+        const raw = localStorage.getItem(FILL_MEMORY_KEY) || "";
+        if (byteLen(raw) > FILL_MEMORY_MAX_BYTES) return { enabled: false, entries: {} };
+        const parsed = JSON.parse(raw || "null");
+        if (!parsed || parsed.version !== 1 || typeof parsed.enabled !== "boolean" || !parsed.entries || typeof parsed.entries !== "object" || Array.isArray(parsed.entries)) {
+          return { enabled: false, entries: {} };
+        }
+        const entries = Object.create(null);
+        for (const [id, entry] of Object.entries(parsed.entries).slice(-FILL_MEMORY_MAX_SNIPPETS)) {
+          if (typeof id !== "string" || !id || !entry || typeof entry !== "object" || typeof entry.fingerprint !== "string" || !entry.values || typeof entry.values !== "object" || Array.isArray(entry.values)) continue;
+          const values = Object.create(null);
+          for (const [name, value] of Object.entries(entry.values)) {
+            if (typeof name === "string" && typeof value === "string" && byteLen(value) <= FILL_MEMORY_MAX_BYTES) values[name] = value;
+          }
+          entries[id] = { fingerprint: entry.fingerprint, values };
+        }
+        return { enabled: parsed.enabled, entries };
+      } catch (_) {
+        return { enabled: false, entries: {} };
+      }
+    }
+
+    function writeFillMemory(memory) {
+      try {
+        const entries = Object.create(null);
+        for (const [id, entry] of Object.entries(memory.entries).slice(-FILL_MEMORY_MAX_SNIPPETS)) {
+          entries[id] = { fingerprint: entry.fingerprint, values: Object.assign(Object.create(null), entry.values) };
+        }
+        const serialized = JSON.stringify({ version: 1, enabled: memory.enabled === true, entries });
+        if (byteLen(serialized) > FILL_MEMORY_MAX_BYTES) return false;
+        localStorage.setItem(FILL_MEMORY_KEY, serialized);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
 
     // ── 主题 token（全部为 ui-theme 已注册的 --dsw-* 别名，浅深两套自动跟随） ──
     // 坑一：bg-layer-1 与 bg-layer-2 在浅色下都是 #ffffff，
@@ -1435,6 +1488,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState(null); // 短暂提示（默认值填充等），关面板后仍可见
       const [editing, setEditing] = useState(null); // 行内编辑草稿
       const [filling, setFilling] = useState(null); // 占位符表单 { snippet, values }
+      const [fillMemoryEnabled, setFillMemoryEnabled] = useState(() => readFillMemory().enabled);
       const [helpOpen, setHelpOpen] = useState(false);
       const [view, setView] = useState("all"); // v1.3 视图切换：all / pinned / recent
       const [history, setHistory] = useState(null); // v1.3 版本历史面板 { id, list, busy }
@@ -1991,7 +2045,10 @@ window.__ModuleLoader__.load({
         const plan = fillPlan(snippet);
         if (plan.kind === "form") {
           const vars = snippet.variables || {};
-          const values = {};
+          const memory = readFillMemory();
+          const remembered = memory.entries[snippet.id];
+          const fingerprint = JSON.stringify({ content: snippet.content, variables: vars });
+          const values = Object.create(null);
           for (const name of varNamesOf(snippet.content).filter((n) => !isDynamic(n))) {
             const definition = vars[name] || {};
             const options = Array.isArray(definition.options) ? definition.options : [];
@@ -2007,7 +2064,14 @@ window.__ModuleLoader__.load({
               values[name] = options[0];
             }
           }
-          setFilling({ snippet, values, sendAfter });
+          const hasMemory = !!remembered?.values && typeof remembered.values === "object";
+          const memoryMatches = hasMemory && remembered.fingerprint === fingerprint;
+          if (hasMemory && !memoryMatches) {
+            const nextEntries = Object.assign(Object.create(null), memory.entries);
+            delete nextEntries[snippet.id];
+            writeFillMemory({ ...memory, entries: nextEntries });
+          }
+          setFilling({ snippet, values, remembered: memory.enabled && memoryMatches ? remembered.values : null, hasMemory: memoryMatches, sendAfter });
           setError(null);
           // 从命令面板（palette）触发时主面板是关闭的，表单渲染在 open 面板内部，
           // 必须同时打开主面板并定位，否则「按回车后表单被吞」。
@@ -2041,6 +2105,73 @@ window.__ModuleLoader__.load({
         setFilling((prev) => (prev ? { ...prev, values: { ...prev.values, [name]: value } } : prev));
       };
 
+      const toggleFillMemory = (enabled) => {
+        const memory = readFillMemory();
+        const next = { ...memory, enabled, entries: Object.assign(Object.create(null), memory.entries) };
+        if (writeFillMemory(next)) {
+          setFillMemoryEnabled(enabled);
+          setFilling((current) => {
+            if (!current) return current;
+            const entry = next.entries[current.snippet.id];
+            const fingerprint = JSON.stringify({ content: current.snippet.content, variables: current.snippet.variables || {} });
+            const valid = entry?.fingerprint === fingerprint && entry?.values && typeof entry.values === "object";
+            return { ...current, hasMemory: !!valid, remembered: enabled && valid ? entry.values : null };
+          });
+        } else {
+          setNotice(t("fill.memoryLimit"));
+        }
+      };
+
+      const applyFillMemory = () => {
+        if (!filling?.remembered) return;
+        const names = varNamesOf(filling.snippet.content).filter((name) => !isDynamic(name));
+        const vars = filling.snippet.variables || {};
+        const values = Object.assign(Object.create(null), filling.values);
+        for (const name of names) {
+          const value = filling.remembered[name];
+          const options = Array.isArray(vars[name]?.options) ? vars[name].options : [];
+          if (typeof value === "string" && (options.length === 0 || value === "" && vars[name]?.required !== true || options.includes(value))) {
+            values[name] = value;
+          }
+        }
+        setFilling((current) => current ? { ...current, values } : current);
+      };
+
+      const clearFillMemory = () => {
+        if (!filling) return;
+        const memory = readFillMemory();
+        memory.entries = Object.assign(Object.create(null), memory.entries);
+        const entry = memory.entries[filling.snippet.id];
+        const fingerprint = JSON.stringify({ content: filling.snippet.content, variables: filling.snippet.variables || {} });
+        if (entry?.fingerprint !== fingerprint) return;
+        delete memory.entries[filling.snippet.id];
+        if (writeFillMemory(memory)) {
+          setFilling((current) => current ? { ...current, remembered: null, hasMemory: false } : current);
+          setNotice(t("fill.memoryCleared"));
+        }
+      };
+
+      const saveFillMemory = (current) => {
+        if (!fillMemoryEnabled) return;
+        const names = varNamesOf(current.snippet.content).filter((name) => !isDynamic(name));
+        const values = Object.create(null);
+        for (const name of names) {
+          if (typeof current.values[name] === "string") values[name] = current.values[name];
+        }
+        const memory = readFillMemory();
+        memory.entries = Object.assign(Object.create(null), memory.entries);
+        delete memory.entries[current.snippet.id];
+        memory.entries[current.snippet.id] = {
+          fingerprint: JSON.stringify({ content: current.snippet.content, variables: current.snippet.variables || {} }),
+          values,
+        };
+        if (writeFillMemory(memory)) {
+          setFilling((active) => active?.snippet.id === current.snippet.id ? { ...active, hasMemory: true } : active);
+        } else {
+          setNotice(t("fill.memoryLimit"));
+        }
+      };
+
       const fillInputRefs = useRef(Object.create(null));
 
       // Open the fill form directly into the first required field so keyboard
@@ -2069,6 +2200,7 @@ window.__ModuleLoader__.load({
           setError(t("error.insertFailed"));
           return;
         }
+        saveFillMemory(cur);
         touch(cur.snippet.id);
         setFilling(null);
         setError(null);
@@ -3133,6 +3265,25 @@ window.__ModuleLoader__.load({
             style: style.editor,
           },
           h("div", { style: style.label }, t("fill.title", { name: cur.snippet.name })),
+          h("label", { style: { ...style.checkWrap, padding: "4px 0" } },
+            h("input", {
+              type: "checkbox",
+              checked: fillMemoryEnabled,
+              onChange: (ev) => toggleFillMemory(ev.target.checked),
+            }),
+            t("fill.remember"),
+          ),
+          h("div", { style: style.hintMuted }, t("fill.memoryHint")),
+          cur.remembered
+            ? h("div", { style: style.actions },
+              h("button", { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: applyFillMemory }, t("fill.applyMemory")),
+              h("button", { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: clearFillMemory }, t("fill.clearMemory")),
+            )
+            : cur.hasMemory
+              ? h("div", { style: style.actions },
+                h("button", { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: clearFillMemory }, t("fill.clearMemory")),
+              )
+              : null,
           names.map((nm) => {
             const d = vars[nm] || {};
             const required = d.required === true;
