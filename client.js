@@ -200,6 +200,16 @@ window.__ModuleLoader__.load({
       "panel.builtinPlan": "将新增 {added} 条 · 恢复 {restored} 条 · 识别旧模板 {adopted} 条 · 已存在 {present} 条 · 冲突跳过 {conflicts} 条",
       "panel.builtinConflicts": "同名或标识冲突：{names}",
       "notice.builtinRestored": "内置模板恢复完成：新增 {added} 条，恢复 {restored} 条，识别旧模板 {adopted} 条",
+      "panel.purge": "清理回收站",
+      "panel.purgeHint": "先预演将永久清理的已删除片段；对应历史版本保留，清理前会创建库备份。",
+      "panel.purgePreview": "预演清理",
+      "panel.purgeConfirm": "确认永久清理",
+      "panel.purgePlan": "将永久清理 {count} 条已删除片段{names}{remaining}",
+      "panel.purgePlanNames": "：{names}",
+      "panel.purgePlanRemaining": " 等 {count} 条",
+      "panel.purgeEmpty": "回收站为空，无需清理。",
+      "panel.purgeReadonly": "片段库处于只读状态，不能清理。",
+      "notice.purged": "已清理 {count} 条已删除片段；历史版本保留。",
       "panel.openFile": "打开",
       "panel.openFileTitle": "在系统文件管理器中打开这个文件",
       "panel.undoAll": "全部撤销",
@@ -396,6 +406,16 @@ window.__ModuleLoader__.load({
       "panel.builtinPlan": "{added} to add · {restored} to restore · {adopted} legacy templates recognized · {present} already present · {conflicts} conflicts skipped",
       "panel.builtinConflicts": "Name or identity conflicts: {names}",
       "notice.builtinRestored": "Built-in templates restored: {added} added, {restored} restored, {adopted} legacy templates recognized",
+      "panel.purge": "Empty trash",
+      "panel.purgeHint": "Preview deleted snippets before permanent removal. History is retained, and a library backup is created first.",
+      "panel.purgePreview": "Preview cleanup",
+      "panel.purgeConfirm": "Confirm permanent cleanup",
+      "panel.purgePlan": "Permanently remove {count} deleted snippets{names}{remaining}",
+      "panel.purgePlanNames": ": {names}",
+      "panel.purgePlanRemaining": " and {count} more",
+      "panel.purgeEmpty": "Trash is empty; nothing to clean up.",
+      "panel.purgeReadonly": "The library is read-only and cannot be cleaned up.",
+      "notice.purged": "Removed {count} deleted snippets; their history was retained.",
       "panel.openFile": "Open",
       "panel.openFileTitle": "Open this file in the system file manager",
       "panel.undoAll": "Undo all",
@@ -1407,6 +1427,8 @@ window.__ModuleLoader__.load({
       const [restoringBackup, setRestoringBackup] = useState(null);
       const [builtinPreview, setBuiltinPreview] = useState(null);
       const [builtinLoading, setBuiltinLoading] = useState(false);
+      const [purgePreview, setPurgePreview] = useState(null);
+      const [purgeLoading, setPurgeLoading] = useState(false);
       const [deleted, setDeleted] = useState([]); // 最近 5 条 [{id,name}]，可逐条或全部撤销
       const [query, setQuery] = useState("");
       const [selected, setSelected] = useState(-1); // §3.2 键盘 ↑↓ 导航：visible 扁平数组的下标，-1 = 未选中
@@ -1437,6 +1459,8 @@ window.__ModuleLoader__.load({
       const backupConfirmRef = useRef(null);
       const builtinPreviewButtonRef = useRef(null);
       const builtinConfirmRef = useRef(null);
+      const purgePreviewButtonRef = useRef(null);
+      const purgeConfirmRef = useRef(null);
       const nameRef = useRef(null);
       const editorFocusTokenRef = useRef(0);
       const editingRef = useRef(null);
@@ -1594,6 +1618,9 @@ window.__ModuleLoader__.load({
           if (builtinPreview) {
             setBuiltinPreview(null);
             setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+          } else if (purgePreview) {
+            setPurgePreview(null);
+            setTimeout(() => purgePreviewButtonRef.current?.focus?.(), 0);
           } else if (restoringBackup) {
             const name = restoringBackup.name;
             setRestoringBackup(null);
@@ -1670,6 +1697,7 @@ window.__ModuleLoader__.load({
             e.preventDefault();
             e.stopPropagation();
             if (builtinPreview) confirmBuiltinRestore();
+            else if (purgePreview) confirmPurge();
             else if (restoringBackup) restoreSelectedBackup();
             else previewBuiltinRestore();
             return;
@@ -1708,7 +1736,7 @@ window.__ModuleLoader__.load({
           window.removeEventListener("keydown", onKey, true);
           document.removeEventListener("focusin", rememberComposer, true);
         };
-      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, selectedImport, importReplace, importing, importPreview, backupOpen, restoringBackup, builtinPreview, builtinLoading, review, filling, editing, history, query, helpOpen]);
+      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, selectedImport, importReplace, importing, importPreview, backupOpen, restoringBackup, builtinPreview, builtinLoading, purgePreview, purgeLoading, review, filling, editing, history, query, helpOpen]);
 
       useEffect(() => {
         if (helpOpen) setTimeout(() => helpCloseRef.current?.focus?.(), 0);
@@ -1725,6 +1753,10 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (builtinPreview) setTimeout(() => builtinConfirmRef.current?.focus?.(), 0);
       }, [builtinPreview]);
+
+      useEffect(() => {
+        if (purgePreview) setTimeout(() => purgeConfirmRef.current?.focus?.(), 0);
+      }, [purgePreview]);
 
       // §3.1：启动时问一次模型可用性。拿不到就不降级为「假装可用」——
       // 保持预置的可用状态，让点击时的错误提示兜底（老 host 没有这个字段）。
@@ -2066,6 +2098,7 @@ window.__ModuleLoader__.load({
         setBackupOpen(false);
         setRestoringBackup(null);
         setBuiltinPreview(null);
+        setPurgePreview(null);
       };
 
       const beginEdit = (snippet) => {
@@ -2723,8 +2756,9 @@ window.__ModuleLoader__.load({
       };
 
       const previewBuiltinRestore = () => {
-        if (builtinLoading) return;
+        if (builtinLoading || purgeLoading) return;
         setRestoringBackup(null);
+        setPurgePreview(null);
         setBuiltinLoading(true);
         setError(null);
         Promise.resolve(rpc.call(CHANNEL, "builtin-restore", { dryRun: true }))
@@ -2766,6 +2800,50 @@ window.__ModuleLoader__.load({
           })
           .catch((err) => {
             setBuiltinLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const previewPurge = () => {
+        if (purgeLoading || builtinLoading || readOnly) return;
+        setBuiltinPreview(null);
+        setPurgeLoading(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "purge", { dryRun: true }))
+          .then((result) => {
+            setPurgeLoading(false);
+            if (result?.ok) setPurgePreview({ plan: result.value.plan, storeHash: result.value.storeHash, readOnly: result.value.readOnly === true });
+            else setError(result?.error?.message || t("error.readFailed"));
+          })
+          .catch((err) => {
+            setPurgeLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const confirmPurge = () => {
+        if (purgeLoading || !purgePreview || purgePreview.plan.count === 0 || purgePreview.readOnly || readOnly) return;
+        setPurgeLoading(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "purge", { expectedStoreHash: purgePreview.storeHash }))
+          .then((result) => {
+            setPurgeLoading(false);
+            if (result?.ok) {
+              applyResult(result);
+              setDeleted([]);
+              setNotice(t("notice.purged", { count: result.value.plan.count }));
+              setPurgePreview(null);
+              setTimeout(() => purgePreviewButtonRef.current?.focus?.(), 0);
+            } else {
+              if (result?.error?.code === "conflict") {
+                setPurgePreview(null);
+                setTimeout(() => purgePreviewButtonRef.current?.focus?.(), 0);
+              }
+              setError(result?.error?.message || t("error.deleteFailed"));
+            }
+          })
+          .catch((err) => {
+            setPurgeLoading(false);
             setError(String((err && err.message) || err));
           });
       };
@@ -3881,6 +3959,7 @@ window.__ModuleLoader__.load({
                           setBackupOpen(false);
                           setRestoringBackup(null);
                           setBuiltinPreview(null);
+                          setPurgePreview(null);
                         }
                         setError(null);
                       },
@@ -3901,6 +3980,7 @@ window.__ModuleLoader__.load({
                         setBackupOpen(next);
                         setRestoringBackup(null);
                         setBuiltinPreview(null);
+                        setPurgePreview(null);
                         if (next) {
                           setHistory(null);
                           setImportOpen(false);
@@ -4046,6 +4126,7 @@ window.__ModuleLoader__.load({
                         },
                         onClick: () => {
                           setBuiltinPreview(null);
+                          setPurgePreview(null);
                           setRestoringBackup(backup);
                         },
                       }, t("panel.backupRestore")),
@@ -4117,6 +4198,43 @@ window.__ModuleLoader__.load({
                           names: builtinPreview.plan.conflicts.map((item) => item.name).join("、"),
                         }))
                         : null,
+                    )
+                    : null,
+                ),
+                h("div", { style: style.editor },
+                  h("div", { style: style.label }, t("panel.purge")),
+                  h("div", { style: style.hintMuted }, t("panel.purgeHint")),
+                  h("div", { style: style.actions },
+                    purgePreview
+                      ? h("button", {
+                        type: "button",
+                        className: "ps-ghost",
+                        style: style.btnGhost,
+                        disabled: purgeLoading,
+                        onClick: () => {
+                          setPurgePreview(null);
+                          setTimeout(() => purgePreviewButtonRef.current?.focus?.(), 0);
+                        },
+                      }, t("panel.backupCancel"))
+                      : null,
+                    h("button", {
+                      type: "button",
+                      className: purgePreview ? "ps-primary" : "ps-ghost",
+                      style: purgeLoading ? { ...style.btnGhost, ...style.btnDisabled } : purgePreview ? style.btnPrimary : style.btnGhost,
+                      disabled: purgeLoading || (purgePreview ? purgePreview.readOnly || purgePreview.plan.count === 0 : readOnly),
+                      ref: purgePreview ? purgeConfirmRef : purgePreviewButtonRef,
+                      onClick: purgePreview ? confirmPurge : previewPurge,
+                    }, purgeLoading ? t("panel.builtinLoading") : purgePreview ? t("panel.purgeConfirm") : t("panel.purgePreview")),
+                  ),
+                  purgePreview
+                    ? h("div", { style: style.hintMuted, role: "status" },
+                      t("panel.purgePlan", {
+                        count: purgePreview.plan.count,
+                        names: purgePreview.plan.names.length ? t("panel.purgePlanNames", { names: purgePreview.plan.names.join("、") }) : "",
+                        remaining: purgePreview.plan.remaining ? t("panel.purgePlanRemaining", { count: purgePreview.plan.remaining }) : "",
+                      }),
+                      purgePreview.plan.count === 0 ? h("div", { style: style.hintMuted }, t("panel.purgeEmpty")) : null,
+                      purgePreview.readOnly ? h("div", { style: style.hintMuted }, t("panel.purgeReadonly")) : null,
                     )
                     : null,
                 ),

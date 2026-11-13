@@ -2,6 +2,12 @@
 
 本文件记录 `dsh-prompt-snippets` 每个发布版本的用户可见变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## Unreleased
+
+### 新增
+
+- 备份恢复区域新增回收站清理预演与确认；确认前校验片段库指纹，清理前强制创建轮换备份，并保留对应历史版本。
+
 ## [1.5.0] - 2026-11-12
 
 ### 新增

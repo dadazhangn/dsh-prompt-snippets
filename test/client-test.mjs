@@ -124,6 +124,9 @@ const fakeRpc = {
     }
     if (endpoint === "backups") return Promise.resolve({ ok: true, value: { backups: [{ name: "snippets.json.bak", size: 128, modifiedAt: 1_800_000_000_000, sourceHash: "a".repeat(64) }] } });
     if (endpoint === "restore-backup") return Promise.resolve({ ok: true, value: { snippets: DATA, restoredBackup: payload.name } });
+    if (endpoint === "purge") return Promise.resolve(payload?.dryRun
+      ? { ok: true, value: { dryRun: true, storeHash: "purge-store-hash", plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 } } }
+      : { ok: true, value: { plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 }, snippets: DATA } });
     if (endpoint === "builtin-restore") return Promise.resolve(builtinRestoreMode === "conflict"
       ? { ok: false, error: { code: "conflict", message: "片段库在预演后发生变化，请重新预演" } }
       : {
@@ -816,6 +819,9 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   fakeRpc.call = (channel, endpoint, payload) => {
     calls.push({ channel, endpoint, payload });
     if (endpoint === "list") return Promise.resolve({ ok: true, value: { version: 3, snippets: DATA } });
+    if (endpoint === "purge") return Promise.resolve(payload?.dryRun
+      ? { ok: true, value: { dryRun: true, storeHash: "purge-store-hash", plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 } } }
+      : { ok: true, value: { plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 }, snippets: DATA } });
     if (endpoint === "save") {
       const created = { id: "clone-created", ...payload, revision: 1, useCount: 0, lastUsedAt: null, createdAt: 4, updatedAt: 4, deletedAt: null };
       return Promise.resolve({ ok: true, value: { snippets: [...DATA, created], snippet: created } });
@@ -837,6 +843,9 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
     }
     if (endpoint === "backups") return Promise.resolve({ ok: true, value: { backups: [{ name: "snippets.json.bak", size: 128, modifiedAt: 1_800_000_000_000, sourceHash: "a".repeat(64) }] } });
     if (endpoint === "restore-backup") return Promise.resolve({ ok: true, value: { snippets: DATA, restoredBackup: payload.name } });
+    if (endpoint === "purge") return Promise.resolve(payload?.dryRun
+      ? { ok: true, value: { dryRun: true, storeHash: "purge-store-hash", plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 } } }
+      : { ok: true, value: { plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 }, snippets: DATA } });
     if (endpoint === "builtin-restore") return Promise.resolve(builtinRestoreMode === "conflict"
       ? { ok: false, error: { code: "conflict", message: "片段库在预演后发生变化，请重新预演" } }
       : {
@@ -1235,6 +1244,50 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   fakeRpc.call = readonlyRpc;
   check("只读场景成功完成预演", calls.filter((call) => call.endpoint === "builtin-restore").length === beforeReadonlyPreview + 1);
   builtinPreviewReadOnly = false;
+
+  const afterReadonlyPanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(afterReadonlyPanel).find((node) => node?.type === "button" && node.children?.includes("取消恢复"))?.props?.onClick?.();
+  const beforePurgePreview = calls.filter((call) => call.endpoint === "purge").length;
+  const purgePanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(purgePanel).find((node) => node?.type === "button" && node.children?.includes("预演清理"))?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const purgeRegion = flat(rerender(registered.Component, props)).find((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复");
+  check("回收站清理预演显示受影响数量与名称", flat(purgeRegion).some((node) => typeof node === "string" && node.includes("永久清理 2 条已删除片段：旧片段一、旧片段二")));
+  const purgeConfirmButton = flat(purgeRegion).find((node) => node?.type === "button" && node.children?.includes("确认永久清理"));
+  const beforePurgeConfirm = calls.filter((call) => call.endpoint === "purge" && !call.payload?.dryRun).length;
+  let purgeKeyHandler = null;
+  const realPurgeAdd = window.addEventListener;
+  window.addEventListener = (type, handler) => { if (type === "keydown") purgeKeyHandler = handler; };
+  const purgeKeyEffect = effects.filter((entry) => entry.fn.toString().includes("inPanel && backupOpen")).at(-1);
+  const purgeKeyCleanup = purgeKeyEffect?.fn();
+  purgeKeyHandler?.({
+    target: { closest: (selector) => selector === "#ps-panel" ? {} : null },
+    key: "Enter", ctrlKey: true, metaKey: false,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  await new Promise((r) => setImmediate(r));
+  const purgeRequest = calls.filter((call) => call.endpoint === "purge" && !call.payload?.dryRun).at(-1);
+  check("回收站确认按钮存在并可键盘聚焦", !!purgeConfirmButton?.props?.ref);
+  check("回收站 Ctrl+Enter 带预演指纹确认清理", purgeRequest?.payload?.expectedStoreHash === "purge-store-hash");
+  check("打开清理预演调用一次 dryRun", calls.filter((call) => call.endpoint === "purge").length >= beforePurgePreview + 2);
+  purgeKeyCleanup?.();
+  window.addEventListener = realPurgeAdd;
+
+  const purgeRealCall = fakeRpc.call;
+  fakeRpc.call = (channel, endpoint, payload) => endpoint === "purge" && payload?.dryRun
+    ? Promise.resolve({ ok: true, value: { dryRun: true, storeHash: "empty-purge-store-hash", plan: { count: 0, names: [], remaining: 0 } } })
+    : purgeRealCall(channel, endpoint, payload);
+  const emptyPurgePanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(emptyPurgePanel).find((node) => node?.type === "button" && node.children?.includes("预演清理"))?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const emptyPurgeRegion = flat(rerender(registered.Component, props)).find((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复");
+  const emptyPurgeConfirm = flat(emptyPurgeRegion).find((node) => node?.type === "button" && node.children?.includes("确认永久清理"));
+  const beforeEmptyPurgeConfirm = calls.filter((call) => call.endpoint === "purge" && !call.payload?.dryRun).length;
+  emptyPurgeConfirm?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  check("回收站为空时确认按钮禁用且不提交清理", emptyPurgeConfirm?.props?.disabled === true && calls.filter((call) => call.endpoint === "purge" && !call.payload?.dryRun).length === beforeEmptyPurgeConfirm);
+  fakeRpc.call = purgeRealCall;
 }
 
 // —— §3.3 导入失败降级 ——

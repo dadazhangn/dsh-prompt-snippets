@@ -843,6 +843,41 @@ setGroup("内置模板恢复预演与确认");
   check("同批次恢复确认后活跃名称仍唯一", collidingRestore.ok && collidingRestore.value.snippets.filter((snippet) => snippet.name === "周报" && !snippet.deletedAt).length === 1);
 }
 
+setGroup("回收站清理预演与确认");
+{
+  await reset({ version: 4, snippets: [] });
+  const saved = await call("save", { name: "待清理片段", content: "旧正文" });
+  const snippetId = saved.value.snippet.id;
+  await call("save", { id: snippetId, name: "待清理片段", content: "新正文", expectedRevision: saved.value.snippet.revision });
+  await call("delete", { id: snippetId });
+  const beforePreview = await readFile(FILE, "utf8");
+  const preview = await call("purge", { dryRun: true });
+  check("清理预演列出回收站数量且不改主库", preview.ok && preview.value.plan.count === 1 && preview.value.plan.names[0] === "待清理片段" && await readFile(FILE, "utf8") === beforePreview);
+
+  await call("save", { name: "预演后新建", content: "变化" });
+  const stale = await call("purge", { expectedStoreHash: preview.value.storeHash });
+  check("预演后库变化会阻止回收站清理", !stale.ok && stale.error.code === "conflict" && (await read()).snippets.some((snippet) => snippet.id === snippetId));
+
+  const freshPreview = await call("purge", { dryRun: true });
+  const purged = await call("purge", { expectedStoreHash: freshPreview.value.storeHash });
+  const afterPurge = await read();
+  const backups = (await call("backups", {})).value.backups;
+  const latestBackup = backups.find((backup) => backup.name === "snippets.json.bak");
+  const backupContent = latestBackup ? JSON.parse(await readFile(join(DIR, latestBackup.name), "utf8")) : null;
+  const retainedHistory = await call("history", { id: snippetId });
+  check("确认清理永久移除已删除记录并保留活跃项", purged.ok && purged.value.plan.count === 1 && !afterPurge.snippets.some((snippet) => snippet.id === snippetId) && afterPurge.snippets.some((snippet) => snippet.name === "预演后新建"));
+  check("清理前轮换备份仍可恢复被清理记录", backupContent?.snippets?.some((snippet) => snippet.id === snippetId && snippet.deletedAt));
+  check("清理后仍保留该片段历史快照", retainedHistory.ok && retainedHistory.value.history.length === 1 && retainedHistory.value.history[0].content === "旧正文");
+
+  const emptyPreview = await call("purge", { dryRun: true });
+  const emptyPurge = await call("purge", { expectedStoreHash: emptyPreview.value.storeHash });
+  check("回收站为空时确认无写入且结果为零", emptyPreview.ok && emptyPreview.value.plan.count === 0 && emptyPurge.ok && emptyPurge.changed === false);
+
+  await reset({ version: 99, snippets: [] });
+  const readOnlyPurge = await call("purge", { dryRun: true });
+  check("只读库拒绝回收站清理预演", !readOnlyPurge.ok && readOnlyPurge.error.code === "read-only");
+}
+
 // ══════════════ 13. 保留分类语义 ══════════════
 setGroup("13. 保留分类语义");
 await reset({ version: 4, snippets: [] });

@@ -133,6 +133,7 @@ const ENDPOINTS = [
   "backups",
   "restore-backup",
   "builtin-restore",
+  "purge",
   "history",
 ];
 
@@ -1745,6 +1746,52 @@ async function restoreBuiltinTemplates(payload) {
   });
 }
 
+async function purgeDeletedSnippets(payload) {
+  const dryRun = payload?.dryRun === true;
+  const expectedStoreHash = typeof payload?.expectedStoreHash === "string" ? payload.expectedStoreHash : null;
+  if (!dryRun && !/^[a-f0-9]{64}$/u.test(expectedStoreHash || "")) {
+    return fail("bad-request", "缺少有效的预演指纹，请重新预演后确认");
+  }
+
+  return withLock(async () => {
+    const { store, warnings, migrated, raw, readOnly } = await readStore();
+    if (readOnly) return fail("read-only", warnings[0] || "片段库处于只读状态，已拒绝清理。");
+    if (migrated) {
+      if (raw !== undefined) await backupBeforeMigrate(raw);
+      await persist(store);
+    }
+
+    const storeHash = createHash("sha256").update(JSON.stringify(store), "utf8").digest("hex");
+    if (!dryRun && expectedStoreHash !== storeHash) {
+      return fail("conflict", "片段库在预演后发生变化，请重新预演后再清理");
+    }
+    const deleted = store.snippets.filter((snippet) => Boolean(snippet.deletedAt));
+    const plan = {
+      count: deleted.length,
+      names: deleted.slice(0, 10).map((snippet) => snippet.name),
+      remaining: Math.max(0, deleted.length - 10),
+      historyRetained: true,
+    };
+    if (dryRun) {
+      return { ok: true, value: { plan, storeHash, dryRun: true, readOnly: false, warning: warnings.join("\n") || undefined } };
+    }
+    if (deleted.length === 0) {
+      return { ok: true, changed: false, value: { plan, ...view(store).value } };
+    }
+
+    const deletedIds = new Set(deleted.map((snippet) => snippet.id));
+    store.snippets = store.snippets.filter((snippet) => !deletedIds.has(snippet.id));
+    try {
+      const currentRaw = await readFile(dataPath("snippets.json"), "utf8");
+      await writeRequiredRotatedBackup(currentRaw);
+      await atomicallyReplaceStore(store, null);
+    } catch (error) {
+      return fail("internal", `清理失败，主库未被替换：${error instanceof Error ? error.message : String(error)}`);
+    }
+    return { ok: true, changed: true, value: { plan, ...view(store).value } };
+  });
+}
+
 const BACKUP_NAME_RE = /^(?:snippets\.json\.(?:bak(?:\.[1-7])?|pre-v4\.bak)|snippets\.corrupt-[\w.-]+\.json)$/u;
 
 async function listBackups() {
@@ -1851,6 +1898,26 @@ async function atomicallyReplaceStore(store, currentRaw) {
 async function writeRotatedBackup(raw) {
   const target = dataPath("snippets.json.bak");
   const tmp = dataPath(`snippets.restore-backup.${process.pid}.${randomUUID()}.tmp`);
+  let fh = null;
+  try {
+    fh = await open(tmp, "w");
+    await fh.writeFile(raw, "utf8");
+    await fh.sync();
+  } finally {
+    if (fh) await fh.close().catch(() => {});
+  }
+  try {
+    await rotateBackups();
+    await rename(tmp, target);
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
+}
+
+async function writeRequiredRotatedBackup(raw) {
+  const target = dataPath("snippets.json.bak");
+  const tmp = dataPath(`snippets.purge-backup.${process.pid}.${randomUUID()}.tmp`);
   let fh = null;
   try {
     fh = await open(tmp, "w");
@@ -2058,6 +2125,9 @@ async function dispatch(ctx, endpoint, payload, signal) {
       const list = await listHistory(id);
       return { ok: true, value: { id, history: list } };
     }
+
+    case "purge":
+      return purgeDeletedSnippets(payload);
 
     case "backups":
       return listBackups();
