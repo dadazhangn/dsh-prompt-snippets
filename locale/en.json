@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Prompt Snippets",
-    "description": "Save and one-click insert reusable prompt snippets with categories, {{placeholder}} fill forms & dropdown enums, version history, and crash-safe local JSON storage."
+    "description": "Save prompts once, reuse them in DSH with keyboard search, variable fill forms, and one-click insertion. Includes categories, favorites, AI rewrite comparison, version history, and local backups."
   }
 }
