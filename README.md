@@ -98,6 +98,8 @@ The library is stored at `<DSH_HOME>/data/prompt-snippets/snippets.json`. If `DS
 
 Writes use a temporary file and atomic replacement. Rotating `.bak` files can be viewed and restored from **Backups** in the panel; the current library is saved to the rotation before a restore. Malformed data is preserved as a recovery copy. Deletion is reversible, and each snippet keeps up to 20 prior versions.
 
+The same panel can preview and restore the built-in templates. Missing templates are added and deleted built-ins are restored; edited templates and custom snippets are preserved.
+
 Import first previews the number of items to add, update, skip, or move to trash, and lists name conflicts. Nothing is written until you confirm. If the source file changes after preview, preview it again.
 
 ## Contributing

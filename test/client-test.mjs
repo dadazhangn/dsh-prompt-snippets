@@ -3,6 +3,8 @@
 
 const calls = [];
 const results = [];
+let builtinRestoreMode = "ok";
+let builtinPreviewReadOnly = false;
 const check = (label, pass, extra) =>
   results.push(`${pass ? "PASS" : "FAIL"}  ${label}${extra ? "  — " + extra : ""}`);
 
@@ -122,6 +124,17 @@ const fakeRpc = {
     }
     if (endpoint === "backups") return Promise.resolve({ ok: true, value: { backups: [{ name: "snippets.json.bak", size: 128, modifiedAt: 1_800_000_000_000, sourceHash: "a".repeat(64) }] } });
     if (endpoint === "restore-backup") return Promise.resolve({ ok: true, value: { snippets: DATA, restoredBackup: payload.name } });
+    if (endpoint === "purge") return Promise.resolve(payload?.dryRun
+      ? { ok: true, value: { dryRun: true, storeHash: "purge-store-hash", plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 } } }
+      : { ok: true, value: { plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 }, snippets: DATA } });
+    if (endpoint === "builtin-restore") return Promise.resolve(builtinRestoreMode === "conflict"
+      ? { ok: false, error: { code: "conflict", message: "片段库在预演后发生变化，请重新预演" } }
+      : {
+      ok: true,
+      value: payload?.dryRun
+        ? { dryRun: true, storeHash: "builtin-store-hash", readOnly: builtinPreviewReadOnly || undefined, plan: { added: 2, restored: 1, present: 5, conflicts: [{ name: "代码审查" }] } }
+        : { plan: { added: 2, restored: 1, present: 5, conflicts: [{ name: "代码审查" }] }, snippets: DATA },
+      });
     return Promise.resolve({ ok: false, error: { code: "x", message: "unknown" } });
   },
 };
@@ -323,6 +336,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
 // ══════════ §2.5 表单：必填禁用、填值后插入、保留占位符插入 ══════════
 {
   // 构造：必填变量 + 有默认值的非必填变量
+  delete localStorage._v["dsh-prompt-snippets-fill-memory"];
   const SAMPLE = {
     id: "req",
     name: "带必填",
@@ -444,9 +458,44 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   check("填写表单 Ctrl+Enter 插入渲染结果", inserted[0] === "请审查 这段代码，关注 正确性。", inserted[0]);
   check("填写表单 Ctrl+Enter 调用宿主发送", submitted === submitsBeforeBlockedShortcut + 1);
   check("填写表单 Ctrl+Enter 阻止宿主抢占", fillShortcutPrevented === 1 && fillShortcutStopped === 1);
+  check("填写记忆默认关闭且不会保存", flat(rerender(registered.Component, props)).some((node) => node?.props?.id === "ps-panel") === false
+    && localStorage.getItem("dsh-prompt-snippets-fill-memory") === null);
   readyFormKeyCleanup?.();
   window.addEventListener = realWindowAddForFill;
   check("插入后关闭面板", !panelOf(rerender(registered.Component, props)));
+
+  t = openPanel();
+  findBtnByText(t, "带必填").props.onClick();
+  t = rerender(registered.Component, props);
+  let memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  const rememberToggle = allNodes(memoryForm).find((node) => node?.props?.type === "checkbox");
+  check("记忆选项在表单中默认未勾选", rememberToggle?.props?.checked === false);
+  rememberToggle?.props?.onChange({ target: { checked: true } });
+  t = rerender(registered.Component, props);
+  memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  const rememberedInputs = allNodes(memoryForm).filter((node) => node?.props?.className === "ps-input" || node?.props?.className === "ps-textarea");
+  rememberedInputs[0]?.props?.onChange({ target: { value: "记住的代码" } });
+  t = rerender(registered.Component, props);
+  findBtnByText(t, "插入")?.props?.onClick();
+  const savedFillMemory = JSON.parse(localStorage.getItem("dsh-prompt-snippets-fill-memory") || "null");
+  check("开启后成功插入才保存本机记忆", savedFillMemory?.enabled === true && savedFillMemory.entries?.req?.values?.代码 === "记住的代码");
+
+  t = openPanel();
+  findBtnByText(t, "带必填").props.onClick();
+  t = rerender(registered.Component, props);
+  memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  check("记忆不会自动覆盖表单并提供手动填入按钮", !!findBtnByText(memoryForm, "填入上次值")
+    && allNodes(memoryForm).some((node) => node?.props?.className === "ps-textarea" && node?.props?.value === ""));
+  findBtnByText(memoryForm, "填入上次值")?.props?.onClick();
+  t = rerender(registered.Component, props);
+  memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  check("手动填入上次值保留有效填写内容", allNodes(memoryForm).some((node) => node?.props?.className === "ps-textarea" && node?.props?.value === "记住的代码"));
+  findBtnByText(memoryForm, "清除记忆")?.props?.onClick();
+  t = rerender(registered.Component, props);
+  memoryForm = allNodes(panelOf(t)).find((node) => node?.props?.id === "ps-fill-form");
+  check("清除记忆不清空当前表单并删除本机记录", localStorage.getItem("dsh-prompt-snippets-fill-memory") === JSON.stringify({ version: 1, enabled: true, entries: {} })
+    && allNodes(memoryForm).some((node) => node?.props?.className === "ps-textarea" && node?.props?.value === "记住的代码"));
+  findBtnByText(memoryForm, "取消")?.props?.onClick();
 
   // 保留占位符插入
   inserted.length = 0;
@@ -806,6 +855,9 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   fakeRpc.call = (channel, endpoint, payload) => {
     calls.push({ channel, endpoint, payload });
     if (endpoint === "list") return Promise.resolve({ ok: true, value: { version: 3, snippets: DATA } });
+    if (endpoint === "purge") return Promise.resolve(payload?.dryRun
+      ? { ok: true, value: { dryRun: true, storeHash: "purge-store-hash", plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 } } }
+      : { ok: true, value: { plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 }, snippets: DATA } });
     if (endpoint === "save") {
       const created = { id: "clone-created", ...payload, revision: 1, useCount: 0, lastUsedAt: null, createdAt: 4, updatedAt: 4, deletedAt: null };
       return Promise.resolve({ ok: true, value: { snippets: [...DATA, created], snippet: created } });
@@ -827,6 +879,17 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
     }
     if (endpoint === "backups") return Promise.resolve({ ok: true, value: { backups: [{ name: "snippets.json.bak", size: 128, modifiedAt: 1_800_000_000_000, sourceHash: "a".repeat(64) }] } });
     if (endpoint === "restore-backup") return Promise.resolve({ ok: true, value: { snippets: DATA, restoredBackup: payload.name } });
+    if (endpoint === "purge") return Promise.resolve(payload?.dryRun
+      ? { ok: true, value: { dryRun: true, storeHash: "purge-store-hash", plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 } } }
+      : { ok: true, value: { plan: { count: 2, names: ["旧片段一", "旧片段二"], remaining: 0 }, snippets: DATA } });
+    if (endpoint === "builtin-restore") return Promise.resolve(builtinRestoreMode === "conflict"
+      ? { ok: false, error: { code: "conflict", message: "片段库在预演后发生变化，请重新预演" } }
+      : {
+        ok: true,
+        value: payload?.dryRun
+          ? { dryRun: true, storeHash: "builtin-store-hash", plan: { added: 2, restored: 1, adopted: 0, present: 5, conflicts: [{ name: "代码审查" }] } }
+        : { plan: { added: 2, restored: 1, adopted: 0, present: 5, conflicts: [{ name: "代码审查" }] }, snippets: DATA },
+      });
     return Promise.resolve({ ok: false, error: { code: "x", message: "unknown" } });
   };
   const btnToggle = () => {
@@ -1146,6 +1209,121 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
   const freshRequest = calls.filter((call) => call.endpoint === "restore-backup").at(-1);
   check("重新选择后发送刷新得到的备份指纹", freshRequest?.payload?.expectedSourceHash === "b".repeat(64));
   check("恢复成功后关闭备份区域", !flat(rerender(registered.Component, props)).some((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复"));
+
+  const reopenedPanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(reopenedPanel).find((node) => node?.type === "button" && node.children?.includes("备份恢复"))?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  let builtinRegion = flat(rerender(registered.Component, props)).find((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复");
+  const builtinPreviewButton = flat(builtinRegion).find((node) => node?.type === "button" && node.children?.includes("预演恢复"));
+  check("备份恢复区域提供内置模板预演入口", !!builtinPreviewButton);
+  const beforeBuiltinPreview = calls.filter((call) => call.endpoint === "builtin-restore").length;
+  builtinPreviewButton?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  builtinRegion = flat(rerender(registered.Component, props)).find((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复");
+  const confirmBuiltinButton = flat(builtinRegion).find((node) => node?.type === "button" && node.children?.includes("确认恢复内置模板"));
+  check("预演显示新增、恢复、冲突数量", flat(builtinRegion).some((node) => typeof node === "string" && node.includes("新增 2 条") && node.includes("识别旧模板 0 条") && node.includes("冲突跳过 1 条")));
+  check("预演列出同名冲突模板", flat(builtinRegion).some((node) => typeof node === "string" && node.includes("代码审查")));
+  const builtinPreviewCall = calls.filter((call) => call.endpoint === "builtin-restore").at(-1);
+  check("预演调用 builtin-restore dryRun", calls.filter((call) => call.endpoint === "builtin-restore").length === beforeBuiltinPreview + 1 && builtinPreviewCall?.payload?.dryRun === true);
+  check("预演后确认按钮自动聚焦", !!confirmBuiltinButton?.props?.ref);
+  confirmBuiltinButton?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const builtinConfirmCall = calls.filter((call) => call.endpoint === "builtin-restore").at(-1);
+  check("确认恢复携带预演库指纹", builtinConfirmCall?.payload?.expectedStoreHash === "builtin-store-hash");
+  check("恢复成功提示结果并关闭预演确认", flat(rerender(registered.Component, props)).some((node) => typeof node === "string" && node.includes("内置模板恢复完成"))
+    && !flat(rerender(registered.Component, props)).some((node) => node?.type === "button" && node.children?.includes("确认恢复内置模板")));
+
+  const againPanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(againPanel).find((node) => node?.type === "button" && node.children?.includes("预演恢复"))?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const stalePanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  builtinRestoreMode = "conflict";
+  flat(stalePanel).find((node) => node?.type === "button" && node.children?.includes("确认恢复内置模板"))?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  builtinRestoreMode = "ok";
+  const staleAfterConfirm = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  check("库指纹冲突后清除旧预演并要求重新预演", !flat(staleAfterConfirm).some((node) => node?.type === "button" && node.children?.includes("确认恢复内置模板"))
+    && flat(staleAfterConfirm).some((node) => typeof node === "string" && node.includes("预演后发生变化")));
+
+  builtinPreviewReadOnly = true;
+  const beforeReadonlyPreview = calls.filter((call) => call.endpoint === "builtin-restore").length;
+  const readonlyRpc = fakeRpc.call;
+  fakeRpc.call = (channel, endpoint, payload) => {
+    if (endpoint === "builtin-restore" && payload?.dryRun) {
+      calls.push({ channel, endpoint, payload });
+      return Promise.resolve({ ok: true, value: { dryRun: true, storeHash: "readonly-store-hash", readOnly: true, plan: { added: 2, restored: 1, adopted: 0, present: 5, conflicts: [] } } });
+    }
+    return readonlyRpc(channel, endpoint, payload);
+  };
+  const readonlyPanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(readonlyPanel).find((node) => node?.type === "button" && node.children?.includes("预演恢复"))?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const readonlyRegion = flat(rerender(registered.Component, props)).find((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复");
+  const readonlyConfirmButton = flat(readonlyRegion).find((node) => node?.type === "button" && node.children?.includes("确认恢复内置模板"));
+  const beforeReadonlyShortcut = calls.filter((call) => call.endpoint === "builtin-restore" && !call.payload?.dryRun).length;
+  let readonlyKeyHandler = null;
+  const realAdd = window.addEventListener;
+  window.addEventListener = (type, handler) => { if (type === "keydown") readonlyKeyHandler = handler; };
+  const readonlyKeyEffect = effects.filter((entry) => entry.fn.toString().includes("inPanel && backupOpen")).at(-1);
+  const readonlyKeyCleanup = readonlyKeyEffect?.fn();
+  readonlyKeyHandler?.({
+    target: { closest: (selector) => selector === "#ps-panel" ? {} : null },
+    key: "Enter", ctrlKey: true, metaKey: false,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  await new Promise((r) => setImmediate(r));
+  check("只读预演禁用确认按钮", readonlyConfirmButton?.props?.disabled === true);
+  check("只读预演下 Ctrl+Enter 不提交恢复", calls.filter((call) => call.endpoint === "builtin-restore" && !call.payload?.dryRun).length === beforeReadonlyShortcut);
+  readonlyKeyCleanup?.();
+  window.addEventListener = realAdd;
+  fakeRpc.call = readonlyRpc;
+  check("只读场景成功完成预演", calls.filter((call) => call.endpoint === "builtin-restore").length === beforeReadonlyPreview + 1);
+  builtinPreviewReadOnly = false;
+
+  const afterReadonlyPanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(afterReadonlyPanel).find((node) => node?.type === "button" && node.children?.includes("取消恢复"))?.props?.onClick?.();
+  const beforePurgePreview = calls.filter((call) => call.endpoint === "purge").length;
+  const purgePanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(purgePanel).find((node) => node?.type === "button" && node.children?.includes("预演清理"))?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const purgeRegion = flat(rerender(registered.Component, props)).find((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复");
+  check("回收站清理预演显示受影响数量与名称", flat(purgeRegion).some((node) => typeof node === "string" && node.includes("永久清理 2 条已删除片段：旧片段一、旧片段二")));
+  const purgeConfirmButton = flat(purgeRegion).find((node) => node?.type === "button" && node.children?.includes("确认永久清理"));
+  const beforePurgeConfirm = calls.filter((call) => call.endpoint === "purge" && !call.payload?.dryRun).length;
+  let purgeKeyHandler = null;
+  const realPurgeAdd = window.addEventListener;
+  window.addEventListener = (type, handler) => { if (type === "keydown") purgeKeyHandler = handler; };
+  const purgeKeyEffect = effects.filter((entry) => entry.fn.toString().includes("inPanel && backupOpen")).at(-1);
+  const purgeKeyCleanup = purgeKeyEffect?.fn();
+  purgeKeyHandler?.({
+    target: { closest: (selector) => selector === "#ps-panel" ? {} : null },
+    key: "Enter", ctrlKey: true, metaKey: false,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  await new Promise((r) => setImmediate(r));
+  const purgeRequest = calls.filter((call) => call.endpoint === "purge" && !call.payload?.dryRun).at(-1);
+  check("回收站确认按钮存在并可键盘聚焦", !!purgeConfirmButton?.props?.ref);
+  check("回收站 Ctrl+Enter 带预演指纹确认清理", purgeRequest?.payload?.expectedStoreHash === "purge-store-hash");
+  check("打开清理预演调用一次 dryRun", calls.filter((call) => call.endpoint === "purge").length >= beforePurgePreview + 2);
+  purgeKeyCleanup?.();
+  window.addEventListener = realPurgeAdd;
+
+  const purgeRealCall = fakeRpc.call;
+  fakeRpc.call = (channel, endpoint, payload) => endpoint === "purge" && payload?.dryRun
+    ? Promise.resolve({ ok: true, value: { dryRun: true, storeHash: "empty-purge-store-hash", plan: { count: 0, names: [], remaining: 0 } } })
+    : purgeRealCall(channel, endpoint, payload);
+  const emptyPurgePanel = rerender(registered.Component, props).children.find((node) => node?.props?.id === "ps-panel");
+  flat(emptyPurgePanel).find((node) => node?.type === "button" && node.children?.includes("预演清理"))?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  const emptyPurgeRegion = flat(rerender(registered.Component, props)).find((node) => node?.props?.role === "region" && node?.props?.["aria-label"] === "备份恢复");
+  const emptyPurgeConfirm = flat(emptyPurgeRegion).find((node) => node?.type === "button" && node.children?.includes("确认永久清理"));
+  const beforeEmptyPurgeConfirm = calls.filter((call) => call.endpoint === "purge" && !call.payload?.dryRun).length;
+  emptyPurgeConfirm?.props?.onClick?.();
+  await new Promise((r) => setImmediate(r));
+  check("回收站为空时确认按钮禁用且不提交清理", emptyPurgeConfirm?.props?.disabled === true && calls.filter((call) => call.endpoint === "purge" && !call.payload?.dryRun).length === beforeEmptyPurgeConfirm);
+  fakeRpc.call = purgeRealCall;
 }
 
 // —— §3.3 导入失败降级 ——
@@ -1852,6 +2030,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
 
 // 按依赖提交 memo/effect，避免每次渲染都重建监听器而掩盖闭包过期问题。
 {
+  delete localStorage._v["dsh-prompt-snippets-fill-memory"];
   const previousSlots = slots;
   const previousEffects = effects;
   const realCall = fakeRpc.call;
@@ -1970,7 +2149,7 @@ check("表单里有变量输入框", flat(tree).some((x) => x?.props?.placeholde
     findRowBtn(view, "代码审查").props.onClick();
     commit();
     const form = flat(view).find((node) => node?.props?.id === "ps-fill-form");
-    flat(form).find((node) => node?.props?.onChange && (node.type === "input" || node.type === "textarea")).props.onChange({ target: { value: "待审查代码" } });
+    flat(form).find((node) => node?.props?.onChange && (node.type === "textarea" || node.type === "input" && node.props.type !== "checkbox")).props.onChange({ target: { value: "待审查代码" } });
     commit();
     check("帮助隔离测试的占位符必填项已齐全", buttonByText("插入")?.props?.disabled === false);
     const beforeHelpInsert = inserted.length;

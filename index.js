@@ -30,6 +30,7 @@ const DYNAMIC_VAR_NAMES = new Set(["date", "time", "datetime"]);
 // 用户删除后不再重灌；已有数据文件（哪怕空）绝不注入，避免覆盖用户选择。
 const TEMPLATE_PACK = [
   {
+    builtinId: "dsh.prompt-snippets.code-review",
     name: "代码审查",
     category: "开发",
     tags: ["代码", "审查"],
@@ -44,6 +45,7 @@ const TEMPLATE_PACK = [
     },
   },
   {
+    builtinId: "dsh.prompt-snippets.git-commit",
     name: "Git 提交信息",
     category: "开发",
     tags: ["git", "提交"],
@@ -51,6 +53,7 @@ const TEMPLATE_PACK = [
     variables: { 变更说明: { label: "变更说明", required: true } },
   },
   {
+    builtinId: "dsh.prompt-snippets.bug-triage",
     name: "Bug 排查",
     category: "开发",
     tags: ["bug", "排查"],
@@ -62,6 +65,7 @@ const TEMPLATE_PACK = [
     },
   },
   {
+    builtinId: "dsh.prompt-snippets.weekly-report",
     name: "周报",
     category: "写作",
     tags: ["周报", "工作"],
@@ -69,6 +73,7 @@ const TEMPLATE_PACK = [
     variables: { 要点: { label: "工作要点", required: true } },
   },
   {
+    builtinId: "dsh.prompt-snippets.translation",
     name: "翻译润色",
     category: "写作",
     tags: ["翻译", "润色"],
@@ -83,6 +88,7 @@ const TEMPLATE_PACK = [
     },
   },
   {
+    builtinId: "dsh.prompt-snippets.daily-report",
     name: "日报",
     category: "写作",
     tags: ["日报", "工作"],
@@ -90,6 +96,7 @@ const TEMPLATE_PACK = [
     variables: { 要点: { label: "工作要点", required: true } },
   },
   {
+    builtinId: "dsh.prompt-snippets.meeting-notes",
     name: "会议纪要",
     category: "写作",
     tags: ["会议", "纪要"],
@@ -97,6 +104,7 @@ const TEMPLATE_PACK = [
     variables: { 记录: { label: "会议记录", required: true } },
   },
   {
+    builtinId: "dsh.prompt-snippets.learning-plan",
     name: "学习计划",
     category: "学习",
     tags: ["学习", "计划"],
@@ -108,6 +116,7 @@ const TEMPLATE_PACK = [
     },
   },
 ];
+const BUILTIN_IDS = new Set(TEMPLATE_PACK.map((template) => template.builtinId));
 
 /** 本 host 半支持的全部 RPC 端点。client 半用 capabilities 握手校验。 */
 const ENDPOINTS = [
@@ -123,6 +132,8 @@ const ENDPOINTS = [
   "import",
   "backups",
   "restore-backup",
+  "builtin-restore",
+  "purge",
   "history",
 ];
 
@@ -147,7 +158,7 @@ function byteLength(text) {
  * {
  *   version: 4,
  *   snippets: [{
- *     id, name, category, content,
+ *     id, builtinId?, name, category, content,
  *     variables: { [变量名]: { label?, default?, options?, required? } },
  *     createdAt, updatedAt,
  *     revision,      // 片段级单调递增，从 1 起；乐观锁用
@@ -327,6 +338,7 @@ function seedTemplates() {
     const { variables } = normalizeVariables(names, t.variables || {});
     return {
       id: randomUUID(),
+      builtinId: t.builtinId,
       name: t.name,
       category: t.category,
       content: t.content,
@@ -443,7 +455,7 @@ function migrate(data) {
 
     if (changed) stats.repaired++;
 
-    snippets.push({
+    const snippet = {
       id,
       name,
       category,
@@ -458,7 +470,13 @@ function migrate(data) {
       tags,
       pinned,
       pinnedAt,
-    });
+    };
+    if (typeof item.builtinId === "string" && BUILTIN_IDS.has(item.builtinId)) {
+      snippet.builtinId = item.builtinId;
+    } else if (item.builtinId !== undefined) {
+      stats.repaired++;
+    }
+    snippets.push(snippet);
   }
 
   return { store: { version: STORE_VERSION, snippets }, stats };
@@ -1592,6 +1610,188 @@ async function importSnippets(payload, sourceHash = null) {
   });
 }
 
+function isLegacyBuiltinMatch(snippet, template, variables, tags) {
+  return snippet.builtinId === undefined
+    && snippet.name === template.name
+    && snippet.category === template.category
+    && snippet.content === template.content
+    && JSON.stringify(snippet.variables) === JSON.stringify(variables)
+    && JSON.stringify(snippet.tags || []) === JSON.stringify(tags)
+    && snippet.pinned === false;
+}
+
+function planBuiltinRestore(store) {
+  const plan = { added: 0, restored: 0, adopted: 0, present: 0, conflicts: [] };
+  const actions = [];
+  const takenNames = new Set(alive(store).map((snippet) => snippet.name));
+  for (const template of TEMPLATE_PACK) {
+    const { names } = scanPlaceholders(template.content);
+    const { variables } = normalizeVariables(names, template.variables || {});
+    const tags = normalizeTags(template.tags);
+    const matches = store.snippets.filter((snippet) => snippet.builtinId === template.builtinId);
+    if (matches.length > 1) {
+      plan.conflicts.push({ name: template.name, reason: "duplicate-builtin-id" });
+      actions.push({ template, kind: "conflict" });
+      continue;
+    }
+    if (matches.length === 1) {
+      const snippet = matches[0];
+      if (snippet.deletedAt) {
+        const nameConflict = takenNames.has(snippet.name);
+        if (nameConflict) {
+          plan.conflicts.push({ name: snippet.name, reason: "name" });
+          actions.push({ template, snippet, kind: "conflict" });
+        } else {
+          plan.restored++;
+          takenNames.add(snippet.name);
+          actions.push({ template, snippet, kind: "restore" });
+        }
+      } else {
+        plan.present++;
+        actions.push({ template, snippet, kind: "present" });
+      }
+      continue;
+    }
+
+    const sameName = store.snippets.filter((snippet) => snippet.name === template.name);
+    const legacy = sameName.length === 1 && isLegacyBuiltinMatch(sameName[0], template, variables, tags)
+      ? sameName[0]
+      : null;
+    if (legacy) {
+      if (legacy.deletedAt && takenNames.has(legacy.name)) {
+        plan.conflicts.push({ name: legacy.name, reason: "name" });
+        actions.push({ template, snippet: legacy, kind: "conflict" });
+      } else {
+        if (legacy.deletedAt) {
+          plan.restored++;
+          takenNames.add(legacy.name);
+        } else plan.present++;
+        plan.adopted++;
+        actions.push({ template, snippet: legacy, kind: legacy.deletedAt ? "adopt-restore" : "adopt" });
+      }
+    } else if (sameName.length > 0) {
+      plan.conflicts.push({ name: template.name, reason: sameName.length > 1 ? "ambiguous-name" : "name" });
+      actions.push({ template, kind: "conflict" });
+    } else {
+      plan.added++;
+      takenNames.add(template.name);
+      actions.push({ template, kind: "add" });
+    }
+  }
+  return { plan, actions };
+}
+
+async function restoreBuiltinTemplates(payload) {
+  const dryRun = payload?.dryRun === true;
+  const expectedStoreHash = typeof payload?.expectedStoreHash === "string" ? payload.expectedStoreHash : null;
+  if (!dryRun && !/^[a-f0-9]{64}$/u.test(expectedStoreHash || "")) {
+    return fail("bad-request", "缺少有效的预演指纹，请重新预演后确认");
+  }
+
+  if (dryRun) {
+    const { store, warnings, readOnly } = await readAndMigrate();
+    const storeHash = createHash("sha256").update(JSON.stringify(store), "utf8").digest("hex");
+    const { plan } = planBuiltinRestore(store);
+    return {
+      ok: true,
+      value: { plan, storeHash, dryRun: true, readOnly: readOnly || undefined, warning: warnings.join("\n") || undefined },
+    };
+  }
+
+  return transact((store) => {
+    const storeHash = createHash("sha256").update(JSON.stringify(store), "utf8").digest("hex");
+    if (expectedStoreHash !== storeHash) {
+      return fail("conflict", "片段库在预演后发生变化，请重新预演后再确认");
+    }
+    const { plan, actions } = planBuiltinRestore(store);
+    const now = Date.now();
+    for (const action of actions) {
+      if (action.kind === "add") {
+        const template = action.template;
+        const { names } = scanPlaceholders(template.content);
+        const { variables } = normalizeVariables(names, template.variables || {});
+        store.snippets.push({
+          id: randomUUID(),
+          builtinId: template.builtinId,
+          name: template.name,
+          category: template.category,
+          content: template.content,
+          variables,
+          createdAt: now,
+          updatedAt: now,
+          revision: 1,
+          deletedAt: null,
+          useCount: 0,
+          lastUsedAt: null,
+          tags: normalizeTags(template.tags),
+          pinned: false,
+          pinnedAt: null,
+        });
+      } else if (action.kind === "adopt" || action.kind === "adopt-restore" || action.kind === "restore") {
+        const snippet = action.snippet;
+        if (action.kind === "adopt" || action.kind === "adopt-restore") snippet.builtinId = action.template.builtinId;
+        if (action.kind === "restore" || action.kind === "adopt-restore") {
+          snippet.deletedAt = null;
+          snippet.updatedAt = now;
+          snippet.revision += 1;
+        }
+      }
+    }
+    const changed = plan.added > 0 || plan.restored > 0 || plan.adopted > 0;
+    return {
+      ok: true,
+      changed,
+      value: { plan, ...view(store).value },
+    };
+  });
+}
+
+async function purgeDeletedSnippets(payload) {
+  const dryRun = payload?.dryRun === true;
+  const expectedStoreHash = typeof payload?.expectedStoreHash === "string" ? payload.expectedStoreHash : null;
+  if (!dryRun && !/^[a-f0-9]{64}$/u.test(expectedStoreHash || "")) {
+    return fail("bad-request", "缺少有效的预演指纹，请重新预演后确认");
+  }
+
+  return withLock(async () => {
+    const { store, warnings, migrated, raw, readOnly } = await readStore();
+    if (readOnly) return fail("read-only", warnings[0] || "片段库处于只读状态，已拒绝清理。");
+    if (migrated) {
+      if (raw !== undefined) await backupBeforeMigrate(raw);
+      await persist(store);
+    }
+
+    const storeHash = createHash("sha256").update(JSON.stringify(store), "utf8").digest("hex");
+    if (!dryRun && expectedStoreHash !== storeHash) {
+      return fail("conflict", "片段库在预演后发生变化，请重新预演后再清理");
+    }
+    const deleted = store.snippets.filter((snippet) => Boolean(snippet.deletedAt));
+    const plan = {
+      count: deleted.length,
+      names: deleted.slice(0, 10).map((snippet) => snippet.name),
+      remaining: Math.max(0, deleted.length - 10),
+      historyRetained: true,
+    };
+    if (dryRun) {
+      return { ok: true, value: { plan, storeHash, dryRun: true, readOnly: false, warning: warnings.join("\n") || undefined } };
+    }
+    if (deleted.length === 0) {
+      return { ok: true, changed: false, value: { plan, ...view(store).value } };
+    }
+
+    const deletedIds = new Set(deleted.map((snippet) => snippet.id));
+    store.snippets = store.snippets.filter((snippet) => !deletedIds.has(snippet.id));
+    try {
+      const currentRaw = await readFile(dataPath("snippets.json"), "utf8");
+      await writeRequiredRotatedBackup(currentRaw);
+      await atomicallyReplaceStore(store, null);
+    } catch (error) {
+      return fail("internal", `清理失败，主库未被替换：${error instanceof Error ? error.message : String(error)}`);
+    }
+    return { ok: true, changed: true, value: { plan, ...view(store).value } };
+  });
+}
+
 const BACKUP_NAME_RE = /^(?:snippets\.json\.(?:bak(?:\.[1-7])?|pre-v4\.bak)|snippets\.corrupt-[\w.-]+\.json)$/u;
 
 async function listBackups() {
@@ -1698,6 +1898,26 @@ async function atomicallyReplaceStore(store, currentRaw) {
 async function writeRotatedBackup(raw) {
   const target = dataPath("snippets.json.bak");
   const tmp = dataPath(`snippets.restore-backup.${process.pid}.${randomUUID()}.tmp`);
+  let fh = null;
+  try {
+    fh = await open(tmp, "w");
+    await fh.writeFile(raw, "utf8");
+    await fh.sync();
+  } finally {
+    if (fh) await fh.close().catch(() => {});
+  }
+  try {
+    await rotateBackups();
+    await rename(tmp, target);
+  } catch (error) {
+    await unlink(tmp).catch(() => {});
+    throw error;
+  }
+}
+
+async function writeRequiredRotatedBackup(raw) {
+  const target = dataPath("snippets.json.bak");
+  const tmp = dataPath(`snippets.purge-backup.${process.pid}.${randomUUID()}.tmp`);
   let fh = null;
   try {
     fh = await open(tmp, "w");
@@ -1906,11 +2126,17 @@ async function dispatch(ctx, endpoint, payload, signal) {
       return { ok: true, value: { id, history: list } };
     }
 
+    case "purge":
+      return purgeDeletedSnippets(payload);
+
     case "backups":
       return listBackups();
 
     case "restore-backup":
       return restoreBackup(payload);
+
+    case "builtin-restore":
+      return restoreBuiltinTemplates(payload);
 
     case "optimize": {
       let content = typeof payload?.content === "string" ? payload.content : "";

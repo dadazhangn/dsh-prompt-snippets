@@ -75,6 +75,12 @@ window.__ModuleLoader__.load({
       "fill.insert": "插入",
       "fill.title": "填写「{name}」的占位符",
       "fill.keyboardHint": "Tab / Shift+Tab 切换变量 · Ctrl+Enter 插入并发送 · Esc 取消",
+      "fill.remember": "启用本机填写记忆（成功插入后保存）",
+      "fill.applyMemory": "填入上次值",
+      "fill.clearMemory": "清除记忆",
+      "fill.memoryHint": "默认关闭；开启后仅在成功插入时更新，可手动填入或清除。",
+      "fill.memoryCleared": "已清除此片段的填写记忆。",
+      "fill.memoryLimit": "本次填写过长，未能保存到本机记忆。",
       "help.title": "快捷键与键盘操作",
       "help.open": "快捷键帮助",
       "help.close": "关闭快捷键帮助",
@@ -191,6 +197,25 @@ window.__ModuleLoader__.load({
       "panel.backupConfirmBtn": "确认恢复",
       "panel.backupCancel": "取消恢复",
       "notice.backupRestored": "已从 {name} 恢复片段库",
+      "panel.builtinRestore": "恢复内置模板",
+      "panel.builtinRestoreHint": "只补回缺失的内置模板；已修改的模板会保留原样，同名自建片段会跳过。",
+      "panel.builtinPreview": "预演恢复",
+      "panel.builtinConfirm": "确认恢复内置模板",
+      "panel.builtinLoading": "恢复中…",
+      "panel.builtinReadonly": "片段库处于只读状态，当前只能查看预演结果，不能恢复。",
+      "panel.builtinPlan": "将新增 {added} 条 · 恢复 {restored} 条 · 识别旧模板 {adopted} 条 · 已存在 {present} 条 · 冲突跳过 {conflicts} 条",
+      "panel.builtinConflicts": "同名或标识冲突：{names}",
+      "notice.builtinRestored": "内置模板恢复完成：新增 {added} 条，恢复 {restored} 条，识别旧模板 {adopted} 条",
+      "panel.purge": "清理回收站",
+      "panel.purgeHint": "先预演将永久清理的已删除片段；对应历史版本保留，清理前会创建库备份。",
+      "panel.purgePreview": "预演清理",
+      "panel.purgeConfirm": "确认永久清理",
+      "panel.purgePlan": "将永久清理 {count} 条已删除片段{names}{remaining}",
+      "panel.purgePlanNames": "：{names}",
+      "panel.purgePlanRemaining": " 等 {count} 条",
+      "panel.purgeEmpty": "回收站为空，无需清理。",
+      "panel.purgeReadonly": "片段库处于只读状态，不能清理。",
+      "notice.purged": "已清理 {count} 条已删除片段；历史版本保留。",
       "panel.openFile": "打开",
       "panel.openFileTitle": "在系统文件管理器中打开这个文件",
       "panel.undoAll": "全部撤销",
@@ -262,6 +287,12 @@ window.__ModuleLoader__.load({
       "fill.insert": "Insert",
       "fill.title": "Fill placeholders for \"{name}\"",
       "fill.keyboardHint": "Tab / Shift+Tab move between fields · Ctrl+Enter insert & send · Esc cancel",
+      "fill.remember": "Enable local fill memory (save after successful insert)",
+      "fill.applyMemory": "Fill last values",
+      "fill.clearMemory": "Clear memory",
+      "fill.memoryHint": "Off by default. When enabled, values update after a successful insert; you can fill or clear them manually.",
+      "fill.memoryCleared": "Remembered values for this snippet were cleared.",
+      "fill.memoryLimit": "These values were too large to save in local memory.",
       "help.title": "Keyboard shortcuts",
       "help.open": "Keyboard shortcuts",
       "help.close": "Close keyboard shortcuts",
@@ -378,6 +409,25 @@ window.__ModuleLoader__.load({
       "panel.backupConfirmBtn": "Confirm restore",
       "panel.backupCancel": "Cancel restore",
       "notice.backupRestored": "Library restored from {name}",
+      "panel.builtinRestore": "Restore built-in templates",
+      "panel.builtinRestoreHint": "Only missing built-in templates are added. Edited templates are preserved, and custom snippets with matching names are skipped.",
+      "panel.builtinPreview": "Preview restore",
+      "panel.builtinConfirm": "Confirm built-in restore",
+      "panel.builtinLoading": "Restoring…",
+      "panel.builtinReadonly": "The library is read-only. You can review this preview, but cannot restore templates.",
+      "panel.builtinPlan": "{added} to add · {restored} to restore · {adopted} legacy templates recognized · {present} already present · {conflicts} conflicts skipped",
+      "panel.builtinConflicts": "Name or identity conflicts: {names}",
+      "notice.builtinRestored": "Built-in templates restored: {added} added, {restored} restored, {adopted} legacy templates recognized",
+      "panel.purge": "Empty trash",
+      "panel.purgeHint": "Preview deleted snippets before permanent removal. History is retained, and a library backup is created first.",
+      "panel.purgePreview": "Preview cleanup",
+      "panel.purgeConfirm": "Confirm permanent cleanup",
+      "panel.purgePlan": "Permanently remove {count} deleted snippets{names}{remaining}",
+      "panel.purgePlanNames": ": {names}",
+      "panel.purgePlanRemaining": " and {count} more",
+      "panel.purgeEmpty": "Trash is empty; nothing to clean up.",
+      "panel.purgeReadonly": "The library is read-only and cannot be cleaned up.",
+      "notice.purged": "Removed {count} deleted snippets; their history was retained.",
       "panel.openFile": "Open",
       "panel.openFileTitle": "Open this file in the system file manager",
       "panel.undoAll": "Undo all",
@@ -419,6 +469,47 @@ window.__ModuleLoader__.load({
     const MIN_H = 160;
     const POS_KEY = "dsh-prompt-snippets-panel-pos";
     const SIZE_KEY = "dsh-prompt-snippets-panel-size";
+    const FILL_MEMORY_KEY = "dsh-prompt-snippets-fill-memory";
+    const FILL_MEMORY_MAX_BYTES = 64 * 1024;
+    const FILL_MEMORY_MAX_SNIPPETS = 50;
+
+    function readFillMemory() {
+      try {
+        const raw = localStorage.getItem(FILL_MEMORY_KEY) || "";
+        if (byteLen(raw) > FILL_MEMORY_MAX_BYTES) return { enabled: false, entries: {} };
+        const parsed = JSON.parse(raw || "null");
+        if (!parsed || parsed.version !== 1 || typeof parsed.enabled !== "boolean" || !parsed.entries || typeof parsed.entries !== "object" || Array.isArray(parsed.entries)) {
+          return { enabled: false, entries: {} };
+        }
+        const entries = Object.create(null);
+        for (const [id, entry] of Object.entries(parsed.entries).slice(-FILL_MEMORY_MAX_SNIPPETS)) {
+          if (typeof id !== "string" || !id || !entry || typeof entry !== "object" || typeof entry.fingerprint !== "string" || !entry.values || typeof entry.values !== "object" || Array.isArray(entry.values)) continue;
+          const values = Object.create(null);
+          for (const [name, value] of Object.entries(entry.values)) {
+            if (typeof name === "string" && typeof value === "string" && byteLen(value) <= FILL_MEMORY_MAX_BYTES) values[name] = value;
+          }
+          entries[id] = { fingerprint: entry.fingerprint, values };
+        }
+        return { enabled: parsed.enabled, entries };
+      } catch (_) {
+        return { enabled: false, entries: {} };
+      }
+    }
+
+    function writeFillMemory(memory) {
+      try {
+        const entries = Object.create(null);
+        for (const [id, entry] of Object.entries(memory.entries).slice(-FILL_MEMORY_MAX_SNIPPETS)) {
+          entries[id] = { fingerprint: entry.fingerprint, values: Object.assign(Object.create(null), entry.values) };
+        }
+        const serialized = JSON.stringify({ version: 1, enabled: memory.enabled === true, entries });
+        if (byteLen(serialized) > FILL_MEMORY_MAX_BYTES) return false;
+        localStorage.setItem(FILL_MEMORY_KEY, serialized);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
 
     // ── 主题 token（全部为 ui-theme 已注册的 --dsw-* 别名，浅深两套自动跟随） ──
     // 坑一：bg-layer-1 与 bg-layer-2 在浅色下都是 #ffffff，
@@ -1387,12 +1478,17 @@ window.__ModuleLoader__.load({
       const [backups, setBackups] = useState([]);
       const [backupsLoading, setBackupsLoading] = useState(false);
       const [restoringBackup, setRestoringBackup] = useState(null);
+      const [builtinPreview, setBuiltinPreview] = useState(null);
+      const [builtinLoading, setBuiltinLoading] = useState(false);
+      const [purgePreview, setPurgePreview] = useState(null);
+      const [purgeLoading, setPurgeLoading] = useState(false);
       const [deleted, setDeleted] = useState([]); // 最近 5 条 [{id,name}]，可逐条或全部撤销
       const [query, setQuery] = useState("");
       const [selected, setSelected] = useState(-1); // §3.2 键盘 ↑↓ 导航：visible 扁平数组的下标，-1 = 未选中
       const [notice, setNotice] = useState(null); // 短暂提示（默认值填充等），关面板后仍可见
       const [editing, setEditing] = useState(null); // 行内编辑草稿
       const [filling, setFilling] = useState(null); // 占位符表单 { snippet, values }
+      const [fillMemoryEnabled, setFillMemoryEnabled] = useState(() => readFillMemory().enabled);
       const [helpOpen, setHelpOpen] = useState(false);
       const [view, setView] = useState("all"); // v1.3 视图切换：all / pinned / recent
       const [history, setHistory] = useState(null); // v1.3 版本历史面板 { id, list, busy }
@@ -1415,6 +1511,10 @@ window.__ModuleLoader__.load({
       const backupToggleRef = useRef(null);
       const backupRestoreRefs = useRef(Object.create(null));
       const backupConfirmRef = useRef(null);
+      const builtinPreviewButtonRef = useRef(null);
+      const builtinConfirmRef = useRef(null);
+      const purgePreviewButtonRef = useRef(null);
+      const purgeConfirmRef = useRef(null);
       const nameRef = useRef(null);
       const editorFocusTokenRef = useRef(0);
       const editingRef = useRef(null);
@@ -1569,7 +1669,13 @@ window.__ModuleLoader__.load({
           setImportPreview(null);
           setTimeout(() => importToggleRef.current?.focus?.(), 0);
         } else if (backupOpen) {
-          if (restoringBackup) {
+          if (builtinPreview) {
+            setBuiltinPreview(null);
+            setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+          } else if (purgePreview) {
+            setPurgePreview(null);
+            setTimeout(() => purgePreviewButtonRef.current?.focus?.(), 0);
+          } else if (restoringBackup) {
             const name = restoringBackup.name;
             setRestoringBackup(null);
             setTimeout(() => backupRestoreRefs.current[name]?.focus?.(), 0);
@@ -1641,6 +1747,15 @@ window.__ModuleLoader__.load({
             else previewImport();
             return;
           }
+          if (inPanel && backupOpen && e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (builtinPreview) confirmBuiltinRestore();
+            else if (purgePreview) confirmPurge();
+            else if (restoringBackup) restoreSelectedBackup();
+            else previewBuiltinRestore();
+            return;
+          }
 
           if ((inPanel || open) && e.key === "Escape") {
             e.preventDefault();
@@ -1675,7 +1790,7 @@ window.__ModuleLoader__.load({
           window.removeEventListener("keydown", onKey, true);
           document.removeEventListener("focusin", rememberComposer, true);
         };
-      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, selectedImport, importReplace, importing, importPreview, backupOpen, restoringBackup, review, filling, editing, history, query, helpOpen]);
+      }, [paletteOpen, paletteSelected, paletteResults, open, importOpen, selectedImport, importReplace, importing, importPreview, backupOpen, restoringBackup, builtinPreview, builtinLoading, purgePreview, purgeLoading, review, filling, editing, history, query, helpOpen]);
 
       useEffect(() => {
         if (helpOpen) setTimeout(() => helpCloseRef.current?.focus?.(), 0);
@@ -1688,6 +1803,14 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (restoringBackup) setTimeout(() => backupConfirmRef.current?.focus?.(), 0);
       }, [restoringBackup]);
+
+      useEffect(() => {
+        if (builtinPreview) setTimeout(() => builtinConfirmRef.current?.focus?.(), 0);
+      }, [builtinPreview]);
+
+      useEffect(() => {
+        if (purgePreview) setTimeout(() => purgeConfirmRef.current?.focus?.(), 0);
+      }, [purgePreview]);
 
       // §3.1：启动时问一次模型可用性。拿不到就不降级为「假装可用」——
       // 保持预置的可用状态，让点击时的错误提示兜底（老 host 没有这个字段）。
@@ -1922,7 +2045,10 @@ window.__ModuleLoader__.load({
         const plan = fillPlan(snippet);
         if (plan.kind === "form") {
           const vars = snippet.variables || {};
-          const values = {};
+          const memory = readFillMemory();
+          const remembered = memory.entries[snippet.id];
+          const fingerprint = JSON.stringify({ content: snippet.content, variables: vars });
+          const values = Object.create(null);
           for (const name of varNamesOf(snippet.content).filter((n) => !isDynamic(n))) {
             const definition = vars[name] || {};
             const options = Array.isArray(definition.options) ? definition.options : [];
@@ -1938,7 +2064,14 @@ window.__ModuleLoader__.load({
               values[name] = options[0];
             }
           }
-          setFilling({ snippet, values, sendAfter });
+          const hasMemory = !!remembered?.values && typeof remembered.values === "object";
+          const memoryMatches = hasMemory && remembered.fingerprint === fingerprint;
+          if (hasMemory && !memoryMatches) {
+            const nextEntries = Object.assign(Object.create(null), memory.entries);
+            delete nextEntries[snippet.id];
+            writeFillMemory({ ...memory, entries: nextEntries });
+          }
+          setFilling({ snippet, values, remembered: memory.enabled && memoryMatches ? remembered.values : null, hasMemory: memoryMatches, sendAfter });
           setError(null);
           // 从命令面板（palette）触发时主面板是关闭的，表单渲染在 open 面板内部，
           // 必须同时打开主面板并定位，否则「按回车后表单被吞」。
@@ -1972,6 +2105,73 @@ window.__ModuleLoader__.load({
         setFilling((prev) => (prev ? { ...prev, values: { ...prev.values, [name]: value } } : prev));
       };
 
+      const toggleFillMemory = (enabled) => {
+        const memory = readFillMemory();
+        const next = { ...memory, enabled, entries: Object.assign(Object.create(null), memory.entries) };
+        if (writeFillMemory(next)) {
+          setFillMemoryEnabled(enabled);
+          setFilling((current) => {
+            if (!current) return current;
+            const entry = next.entries[current.snippet.id];
+            const fingerprint = JSON.stringify({ content: current.snippet.content, variables: current.snippet.variables || {} });
+            const valid = entry?.fingerprint === fingerprint && entry?.values && typeof entry.values === "object";
+            return { ...current, hasMemory: !!valid, remembered: enabled && valid ? entry.values : null };
+          });
+        } else {
+          setNotice(t("fill.memoryLimit"));
+        }
+      };
+
+      const applyFillMemory = () => {
+        if (!filling?.remembered) return;
+        const names = varNamesOf(filling.snippet.content).filter((name) => !isDynamic(name));
+        const vars = filling.snippet.variables || {};
+        const values = Object.assign(Object.create(null), filling.values);
+        for (const name of names) {
+          const value = filling.remembered[name];
+          const options = Array.isArray(vars[name]?.options) ? vars[name].options : [];
+          if (typeof value === "string" && (options.length === 0 || value === "" && vars[name]?.required !== true || options.includes(value))) {
+            values[name] = value;
+          }
+        }
+        setFilling((current) => current ? { ...current, values } : current);
+      };
+
+      const clearFillMemory = () => {
+        if (!filling) return;
+        const memory = readFillMemory();
+        memory.entries = Object.assign(Object.create(null), memory.entries);
+        const entry = memory.entries[filling.snippet.id];
+        const fingerprint = JSON.stringify({ content: filling.snippet.content, variables: filling.snippet.variables || {} });
+        if (entry?.fingerprint !== fingerprint) return;
+        delete memory.entries[filling.snippet.id];
+        if (writeFillMemory(memory)) {
+          setFilling((current) => current ? { ...current, remembered: null, hasMemory: false } : current);
+          setNotice(t("fill.memoryCleared"));
+        }
+      };
+
+      const saveFillMemory = (current) => {
+        if (!fillMemoryEnabled) return;
+        const names = varNamesOf(current.snippet.content).filter((name) => !isDynamic(name));
+        const values = Object.create(null);
+        for (const name of names) {
+          if (typeof current.values[name] === "string") values[name] = current.values[name];
+        }
+        const memory = readFillMemory();
+        memory.entries = Object.assign(Object.create(null), memory.entries);
+        delete memory.entries[current.snippet.id];
+        memory.entries[current.snippet.id] = {
+          fingerprint: JSON.stringify({ content: current.snippet.content, variables: current.snippet.variables || {} }),
+          values,
+        };
+        if (writeFillMemory(memory)) {
+          setFilling((active) => active?.snippet.id === current.snippet.id ? { ...active, hasMemory: true } : active);
+        } else {
+          setNotice(t("fill.memoryLimit"));
+        }
+      };
+
       const fillInputRefs = useRef(Object.create(null));
 
       // Open the fill form directly into the first required field so keyboard
@@ -2000,6 +2200,7 @@ window.__ModuleLoader__.load({
           setError(t("error.insertFailed"));
           return;
         }
+        saveFillMemory(cur);
         touch(cur.snippet.id);
         setFilling(null);
         setError(null);
@@ -2028,6 +2229,8 @@ window.__ModuleLoader__.load({
         setImportPreview(null);
         setBackupOpen(false);
         setRestoringBackup(null);
+        setBuiltinPreview(null);
+        setPurgePreview(null);
       };
 
       const beginEdit = (snippet) => {
@@ -2684,6 +2887,99 @@ window.__ModuleLoader__.load({
           });
       };
 
+      const previewBuiltinRestore = () => {
+        if (builtinLoading || purgeLoading) return;
+        setRestoringBackup(null);
+        setPurgePreview(null);
+        setBuiltinLoading(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "builtin-restore", { dryRun: true }))
+          .then((result) => {
+            setBuiltinLoading(false);
+            if (result?.ok) setBuiltinPreview({ plan: result.value.plan, storeHash: result.value.storeHash, readOnly: result.value.readOnly === true });
+            else setError(result?.error?.message || t("error.readFailed"));
+          })
+          .catch((err) => {
+            setBuiltinLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const confirmBuiltinRestore = () => {
+        if (builtinLoading || !builtinPreview || builtinPreview.readOnly || readOnly) return;
+        setBuiltinLoading(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "builtin-restore", { expectedStoreHash: builtinPreview.storeHash }))
+          .then((result) => {
+            setBuiltinLoading(false);
+            if (result?.ok) {
+              applyResult(result);
+              setNotice(t("notice.builtinRestored", {
+                added: result.value.plan.added,
+                restored: result.value.plan.restored,
+                adopted: result.value.plan.adopted,
+              }));
+              setBuiltinPreview(null);
+              setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+              load();
+            } else {
+              if (result?.error?.code === "conflict") {
+                setBuiltinPreview(null);
+                setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+              }
+              setError(result?.error?.message || t("error.saveFailed"));
+            }
+          })
+          .catch((err) => {
+            setBuiltinLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const previewPurge = () => {
+        if (purgeLoading || builtinLoading || readOnly) return;
+        setBuiltinPreview(null);
+        setPurgeLoading(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "purge", { dryRun: true }))
+          .then((result) => {
+            setPurgeLoading(false);
+            if (result?.ok) setPurgePreview({ plan: result.value.plan, storeHash: result.value.storeHash, readOnly: result.value.readOnly === true });
+            else setError(result?.error?.message || t("error.readFailed"));
+          })
+          .catch((err) => {
+            setPurgeLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
+      const confirmPurge = () => {
+        if (purgeLoading || !purgePreview || purgePreview.plan.count === 0 || purgePreview.readOnly || readOnly) return;
+        setPurgeLoading(true);
+        setError(null);
+        Promise.resolve(rpc.call(CHANNEL, "purge", { expectedStoreHash: purgePreview.storeHash }))
+          .then((result) => {
+            setPurgeLoading(false);
+            if (result?.ok) {
+              applyResult(result);
+              setDeleted([]);
+              setNotice(t("notice.purged", { count: result.value.plan.count }));
+              setPurgePreview(null);
+              setTimeout(() => purgePreviewButtonRef.current?.focus?.(), 0);
+            } else {
+              if (result?.error?.code === "conflict") {
+                setPurgePreview(null);
+                setTimeout(() => purgePreviewButtonRef.current?.focus?.(), 0);
+              }
+              setError(result?.error?.message || t("error.deleteFailed"));
+            }
+          })
+          .catch((err) => {
+            setPurgeLoading(false);
+            setError(String((err && err.message) || err));
+          });
+      };
+
       const restoreSelectedBackup = () => {
         if (!restoringBackup) return;
         setBackupsLoading(true);
@@ -2969,6 +3265,25 @@ window.__ModuleLoader__.load({
             style: style.editor,
           },
           h("div", { style: style.label }, t("fill.title", { name: cur.snippet.name })),
+          h("label", { style: { ...style.checkWrap, padding: "4px 0" } },
+            h("input", {
+              type: "checkbox",
+              checked: fillMemoryEnabled,
+              onChange: (ev) => toggleFillMemory(ev.target.checked),
+            }),
+            t("fill.remember"),
+          ),
+          h("div", { style: style.hintMuted }, t("fill.memoryHint")),
+          cur.remembered
+            ? h("div", { style: style.actions },
+              h("button", { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: applyFillMemory }, t("fill.applyMemory")),
+              h("button", { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: clearFillMemory }, t("fill.clearMemory")),
+            )
+            : cur.hasMemory
+              ? h("div", { style: style.actions },
+                h("button", { type: "button", className: "ps-ghost", style: style.btnGhost, onClick: clearFillMemory }, t("fill.clearMemory")),
+              )
+              : null,
           names.map((nm) => {
             const d = vars[nm] || {};
             const required = d.required === true;
@@ -3787,12 +4102,15 @@ window.__ModuleLoader__.load({
                       className: "ps-ghost",
                       style: importOpen ? { ...style.btnGhost, ...style.itemEditing } : style.btnGhost,
                       onClick: () => {
-                        setImportOpen((prev) => !prev);
+                        const next = !importOpen;
+                        setImportOpen(next);
                         setImportPreview(null);
-                        if (!importOpen) {
+                        if (next) {
                           setHistory(null);
                           setBackupOpen(false);
                           setRestoringBackup(null);
+                          setBuiltinPreview(null);
+                          setPurgePreview(null);
                         }
                         setError(null);
                       },
@@ -3812,6 +4130,8 @@ window.__ModuleLoader__.load({
                         const next = !backupOpen;
                         setBackupOpen(next);
                         setRestoringBackup(null);
+                        setBuiltinPreview(null);
+                        setPurgePreview(null);
                         if (next) {
                           setHistory(null);
                           setImportOpen(false);
@@ -3955,7 +4275,11 @@ window.__ModuleLoader__.load({
                           if (el) backupRestoreRefs.current[backup.name] = el;
                           else delete backupRestoreRefs.current[backup.name];
                         },
-                        onClick: () => setRestoringBackup(backup),
+                        onClick: () => {
+                          setBuiltinPreview(null);
+                          setPurgePreview(null);
+                          setRestoringBackup(backup);
+                        },
                       }, t("panel.backupRestore")),
                     )),
                 restoringBackup
@@ -3985,6 +4309,86 @@ window.__ModuleLoader__.load({
                     ),
                   )
                   : null,
+                h("div", { style: style.editor },
+                  h("div", { style: style.label }, t("panel.builtinRestore")),
+                  h("div", { style: style.hintMuted }, t("panel.builtinRestoreHint")),
+                  h("div", { style: style.actions },
+                    builtinPreview
+                      ? h("button", {
+                        type: "button",
+                        className: "ps-ghost",
+                        style: style.btnGhost,
+                        disabled: builtinLoading,
+                        onClick: () => {
+                          setBuiltinPreview(null);
+                          setTimeout(() => builtinPreviewButtonRef.current?.focus?.(), 0);
+                        },
+                      }, t("panel.backupCancel"))
+                      : null,
+                    h("button", {
+                      type: "button",
+                      className: builtinPreview ? "ps-primary" : "ps-ghost",
+                      style: builtinLoading ? { ...style.btnGhost, ...style.btnDisabled } : builtinPreview ? style.btnPrimary : style.btnGhost,
+                      disabled: builtinLoading || (builtinPreview ? builtinPreview.readOnly : false),
+                      ref: builtinPreview ? builtinConfirmRef : builtinPreviewButtonRef,
+                      onClick: builtinPreview ? confirmBuiltinRestore : previewBuiltinRestore,
+                    }, builtinLoading ? t("panel.builtinLoading") : builtinPreview ? t("panel.builtinConfirm") : t("panel.builtinPreview")),
+                  ),
+                  builtinPreview
+                    ? h("div", { style: style.hintMuted, role: "status" },
+                      t("panel.builtinPlan", {
+                        added: builtinPreview.plan.added,
+                        restored: builtinPreview.plan.restored,
+                        adopted: builtinPreview.plan.adopted,
+                        present: builtinPreview.plan.present,
+                        conflicts: builtinPreview.plan.conflicts.length,
+                      }),
+                      builtinPreview.readOnly ? h("div", { style: style.hintMuted }, t("panel.builtinReadonly")) : null,
+                      builtinPreview.plan.conflicts.length
+                        ? h("div", { style: style.hintMuted }, t("panel.builtinConflicts", {
+                          names: builtinPreview.plan.conflicts.map((item) => item.name).join("、"),
+                        }))
+                        : null,
+                    )
+                    : null,
+                ),
+                h("div", { style: style.editor },
+                  h("div", { style: style.label }, t("panel.purge")),
+                  h("div", { style: style.hintMuted }, t("panel.purgeHint")),
+                  h("div", { style: style.actions },
+                    purgePreview
+                      ? h("button", {
+                        type: "button",
+                        className: "ps-ghost",
+                        style: style.btnGhost,
+                        disabled: purgeLoading,
+                        onClick: () => {
+                          setPurgePreview(null);
+                          setTimeout(() => purgePreviewButtonRef.current?.focus?.(), 0);
+                        },
+                      }, t("panel.backupCancel"))
+                      : null,
+                    h("button", {
+                      type: "button",
+                      className: purgePreview ? "ps-primary" : "ps-ghost",
+                      style: purgeLoading ? { ...style.btnGhost, ...style.btnDisabled } : purgePreview ? style.btnPrimary : style.btnGhost,
+                      disabled: purgeLoading || (purgePreview ? purgePreview.readOnly || purgePreview.plan.count === 0 : readOnly),
+                      ref: purgePreview ? purgeConfirmRef : purgePreviewButtonRef,
+                      onClick: purgePreview ? confirmPurge : previewPurge,
+                    }, purgeLoading ? t("panel.builtinLoading") : purgePreview ? t("panel.purgeConfirm") : t("panel.purgePreview")),
+                  ),
+                  purgePreview
+                    ? h("div", { style: style.hintMuted, role: "status" },
+                      t("panel.purgePlan", {
+                        count: purgePreview.plan.count,
+                        names: purgePreview.plan.names.length ? t("panel.purgePlanNames", { names: purgePreview.plan.names.join("、") }) : "",
+                        remaining: purgePreview.plan.remaining ? t("panel.purgePlanRemaining", { count: purgePreview.plan.remaining }) : "",
+                      }),
+                      purgePreview.plan.count === 0 ? h("div", { style: style.hintMuted }, t("panel.purgeEmpty")) : null,
+                      purgePreview.readOnly ? h("div", { style: style.hintMuted }, t("panel.purgeReadonly")) : null,
+                    )
+                    : null,
+                ),
               )
               : null,
             exportPath

@@ -756,6 +756,128 @@ await reset({ version: 4, snippets: [] });
   check("get 不存在报 not-found", (await call("get", { id: "无" })).error?.code === "not-found");
 }
 
+// ══════════════ 内置模板恢复 ══════════════
+setGroup("内置模板恢复预演与确认");
+{
+  await reset(null);
+  const seeded = await call("list", {});
+  check("首次预置的 8 条模板带稳定 builtinId", seeded.value.snippets.length === 8 && seeded.value.snippets.every((snippet) => /^dsh\.prompt-snippets\.[a-z0-9-]+$/u.test(snippet.builtinId || "")));
+
+  const target = seeded.value.snippets.find((snippet) => snippet.name === "代码审查");
+  await call("delete", { id: target.id });
+  const preview = await call("builtin-restore", { dryRun: true });
+  check("预演只报告恢复删除项且不写库", preview.ok && preview.value.plan.restored === 1 && preview.value.plan.added === 0 && (await read()).snippets.find((snippet) => snippet.id === target.id).deletedAt !== null);
+  const restored = await call("builtin-restore", { expectedStoreHash: preview.value.storeHash });
+  const restoredStore = await read();
+  const restoredTarget = restoredStore.snippets.find((snippet) => snippet.id === target.id);
+  check("确认恢复保留原 ID 与正文并清除删除状态", restored.ok && restoredTarget.id === target.id && restoredTarget.content === target.content && restoredTarget.deletedAt === null);
+  check("恢复已有模板递增 revision", restoredTarget.revision === target.revision + 2, String(restoredTarget.revision));
+  const repeatPreview = await call("builtin-restore", { dryRun: true });
+  check("重复预演幂等且不再新增或恢复", repeatPreview.value.plan.added === 0 && repeatPreview.value.plan.restored === 0 && repeatPreview.value.plan.present === 8);
+  const repeat = await call("builtin-restore", { expectedStoreHash: repeatPreview.value.storeHash });
+  check("重复确认不改变现有数据", repeat.ok && repeat.value.snippets.length === 8 && repeat.value.snippets.find((snippet) => snippet.id === target.id).revision === restoredTarget.revision);
+  const deletedTemplate = repeat.value.snippets.find((snippet) => snippet.name === "周报");
+  await call("delete", { id: deletedTemplate.id });
+  await call("save", { name: "周报", content: "用户新建的同名片段" });
+  const deletedConflictPreview = await call("builtin-restore", { dryRun: true });
+  check("被删除的内置模板遇到活跃同名片段时预演为冲突", deletedConflictPreview.value.plan.conflicts.some((item) => item.name === "周报") && deletedConflictPreview.value.plan.restored === 0);
+  const deletedConflict = await call("builtin-restore", { expectedStoreHash: deletedConflictPreview.value.storeHash });
+  check("确认时不复活造成重名的内置模板", deletedConflict.ok && deletedConflict.value.snippets.filter((snippet) => snippet.name === "周报" && !snippet.deletedAt).length === 1);
+
+  const edited = await read();
+  const editedTarget = edited.snippets.find((snippet) => snippet.id === target.id);
+  editedTarget.content = "用户改写的内置模板";
+  editedTarget.useCount = 17;
+  await writeFile(FILE, JSON.stringify(edited), "utf8");
+  const editedPreview = await call("builtin-restore", { dryRun: true });
+  const editedRestore = await call("builtin-restore", { expectedStoreHash: editedPreview.value.storeHash });
+  const afterEditedRestore = (await read()).snippets.find((snippet) => snippet.id === target.id);
+  check("已识别但被改名改写的内置模板原样保留", editedRestore.ok && afterEditedRestore.name === editedTarget.name && afterEditedRestore.content === editedTarget.content && afterEditedRestore.useCount === 17);
+
+  const legacy = await read();
+  for (const snippet of legacy.snippets) delete snippet.builtinId;
+  await writeFile(FILE, JSON.stringify(legacy), "utf8");
+  const legacyPreview = await call("builtin-restore", { dryRun: true });
+  check("仅精确匹配官方定义的旧模板可被识别", legacyPreview.value.plan.adopted === 6 && legacyPreview.value.plan.conflicts.length === 2);
+  const legacyRestore = await call("builtin-restore", { expectedStoreHash: legacyPreview.value.storeHash });
+  check("旧版已改写模板冲突不覆盖，其他精确匹配项可认领", legacyRestore.ok && legacyRestore.value.snippets.find((snippet) => snippet.id === target.id).builtinId === undefined && legacyRestore.value.snippets.filter((snippet) => snippet.builtinId).length === 6);
+
+  const ambiguousLegacy = await read();
+  const duplicateWeekly = { ...ambiguousLegacy.snippets.find((snippet) => snippet.name === "周报"), id: "custom-weekly", builtinId: undefined };
+  ambiguousLegacy.snippets.push(duplicateWeekly);
+  await writeFile(FILE, JSON.stringify(ambiguousLegacy), "utf8");
+  const ambiguousPreview = await call("builtin-restore", { dryRun: true });
+  check("重名旧记录即使正文吻合也不自动认领", ambiguousPreview.value.plan.conflicts.some((item) => item.name === "周报"));
+
+  await reset({ version: 4, snippets: [{ id: "custom", name: "代码审查", content: "用户自建内容", variables: {}, deletedAt: null }] });
+  const customPreview = await call("builtin-restore", { dryRun: true });
+  check("同名自建片段列为冲突并跳过", customPreview.value.plan.conflicts.some((item) => item.name === "代码审查"));
+  const customRestore = await call("builtin-restore", { expectedStoreHash: customPreview.value.storeHash });
+  const customStore = await read();
+  check("恢复不覆盖同名自建片段并补齐其他模板", customRestore.ok && customStore.snippets.find((snippet) => snippet.id === "custom").content === "用户自建内容" && customStore.snippets.length === 8);
+
+  const stalePreview = await call("builtin-restore", { dryRun: true });
+  await call("save", { name: "预演后新增", content: "变化" });
+  const staleConfirm = await call("builtin-restore", { expectedStoreHash: stalePreview.value.storeHash });
+  check("预演后片段库变化会阻止恢复", staleConfirm.ok === false && staleConfirm.error.code === "conflict");
+  const missingFingerprint = await call("builtin-restore", {});
+  check("确认请求缺少预演指纹时拒绝写入", missingFingerprint.ok === false && missingFingerprint.error.code === "bad-request");
+
+  await reset({ version: 99, snippets: [] });
+  const readonlyPreview = await call("builtin-restore", { dryRun: true });
+  const readonlyConfirm = await call("builtin-restore", { expectedStoreHash: readonlyPreview.value.storeHash });
+  check("只读库可预演但确认恢复被拒绝", readonlyPreview.ok && readonlyPreview.value.readOnly === true && readonlyConfirm.ok === false && readonlyConfirm.error.code === "read-only");
+
+  await reset(null);
+  await call("list", {});
+  const collidingDeletedBuiltins = await read();
+  const renamedBuiltin = collidingDeletedBuiltins.snippets.find((snippet) => snippet.builtinId === "dsh.prompt-snippets.code-review");
+  const deletedWeeklyBuiltin = collidingDeletedBuiltins.snippets.find((snippet) => snippet.builtinId === "dsh.prompt-snippets.weekly-report");
+  renamedBuiltin.name = "周报";
+  renamedBuiltin.deletedAt = Date.now();
+  deletedWeeklyBuiltin.deletedAt = Date.now();
+  await writeFile(FILE, JSON.stringify(collidingDeletedBuiltins), "utf8");
+  const collidingPreview = await call("builtin-restore", { dryRun: true });
+  check("同批次内置恢复按顺序拦截改名导致的名称冲突", collidingPreview.value.plan.restored === 1 && collidingPreview.value.plan.conflicts.some((item) => item.name === "周报"));
+  const collidingRestore = await call("builtin-restore", { expectedStoreHash: collidingPreview.value.storeHash });
+  check("同批次恢复确认后活跃名称仍唯一", collidingRestore.ok && collidingRestore.value.snippets.filter((snippet) => snippet.name === "周报" && !snippet.deletedAt).length === 1);
+}
+
+setGroup("回收站清理预演与确认");
+{
+  await reset({ version: 4, snippets: [] });
+  const saved = await call("save", { name: "待清理片段", content: "旧正文" });
+  const snippetId = saved.value.snippet.id;
+  await call("save", { id: snippetId, name: "待清理片段", content: "新正文", expectedRevision: saved.value.snippet.revision });
+  await call("delete", { id: snippetId });
+  const beforePreview = await readFile(FILE, "utf8");
+  const preview = await call("purge", { dryRun: true });
+  check("清理预演列出回收站数量且不改主库", preview.ok && preview.value.plan.count === 1 && preview.value.plan.names[0] === "待清理片段" && await readFile(FILE, "utf8") === beforePreview);
+
+  await call("save", { name: "预演后新建", content: "变化" });
+  const stale = await call("purge", { expectedStoreHash: preview.value.storeHash });
+  check("预演后库变化会阻止回收站清理", !stale.ok && stale.error.code === "conflict" && (await read()).snippets.some((snippet) => snippet.id === snippetId));
+
+  const freshPreview = await call("purge", { dryRun: true });
+  const purged = await call("purge", { expectedStoreHash: freshPreview.value.storeHash });
+  const afterPurge = await read();
+  const backups = (await call("backups", {})).value.backups;
+  const latestBackup = backups.find((backup) => backup.name === "snippets.json.bak");
+  const backupContent = latestBackup ? JSON.parse(await readFile(join(DIR, latestBackup.name), "utf8")) : null;
+  const retainedHistory = await call("history", { id: snippetId });
+  check("确认清理永久移除已删除记录并保留活跃项", purged.ok && purged.value.plan.count === 1 && !afterPurge.snippets.some((snippet) => snippet.id === snippetId) && afterPurge.snippets.some((snippet) => snippet.name === "预演后新建"));
+  check("清理前轮换备份仍可恢复被清理记录", backupContent?.snippets?.some((snippet) => snippet.id === snippetId && snippet.deletedAt));
+  check("清理后仍保留该片段历史快照", retainedHistory.ok && retainedHistory.value.history.length === 1 && retainedHistory.value.history[0].content === "旧正文");
+
+  const emptyPreview = await call("purge", { dryRun: true });
+  const emptyPurge = await call("purge", { expectedStoreHash: emptyPreview.value.storeHash });
+  check("回收站为空时确认无写入且结果为零", emptyPreview.ok && emptyPreview.value.plan.count === 0 && emptyPurge.ok && emptyPurge.changed === false);
+
+  await reset({ version: 99, snippets: [] });
+  const readOnlyPurge = await call("purge", { dryRun: true });
+  check("只读库拒绝回收站清理预演", !readOnlyPurge.ok && readOnlyPurge.error.code === "read-only");
+}
+
 // ══════════════ 13. 保留分类语义 ══════════════
 setGroup("13. 保留分类语义");
 await reset({ version: 4, snippets: [] });
